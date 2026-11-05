@@ -3,6 +3,13 @@
 An offline study Bible for Android: the Berean Standard Bible, read aloud in a natural voice,
 with highlights, notes and study material that sits inline with the text.
 
+Built with AI — "vibe coded". I described what I wanted and Claude wrote it, with me testing
+on a real phone and sending it back when it was wrong. Worth knowing before you install it:
+nobody has audited this code, and the bugs it has are the kind that come from being built fast
+rather than carefully. It is a personal project I use daily, shared because friends asked.
+
+The Bible text itself is not AI-generated — it is the Berean Standard Bible, unmodified.
+
 ## Install
 
 **[Download the latest version](https://github.com/froggr/bsb-bible/releases/latest)** — open
@@ -52,3 +59,6 @@ The verse text is the **Berean Standard Bible**, chosen because it is freely ava
 anyone to use and share. Read-aloud uses the open-source **Phonon** speech model.
 
 This repository holds the built app only. Questions or problems: open an issue.
+
+The read-aloud voice is a neural model running on your phone; it mispronounces things
+occasionally, and proper nouns are its weak spot.
