@@ -365,14 +365,14 @@ object Beds {
     )
 
     val ALL = listOf(
-        Item("stillness", "Stillness", "sampled chords \u00b7 0:22 loop", loopStartMs = 22018, loopEndMs = 44322),
-        Item("morning", "Morning", "guitar \u00b7 0:11 loop", loopStartMs = 2198, loopEndMs = 13344),
-        Item("evening", "Evening", "guitar \u00b7 0:34 loop", loopStartMs = 6763, loopEndMs = 51935),
-        Item("psalter", "Psalter", "synth pads \u00b7 0:21 loop", loopStartMs = 20535, loopEndMs = 55828),
-        Item("vigil", "Vigil", "keys \u00b7 1:49 loop", loopStartMs = 46592, loopEndMs = 156299),
-        Item("upper-room", "Upper Room", "electric piano \u00b7 1:39 loop", loopStartMs = 54763, loopEndMs = 141771),
-        Item("wilderness", "Wilderness", "sparse keys \u00b7 1:18 loop", loopStartMs = 39831, loopEndMs = 118656),
-        Item("shepherd", "Shepherd", "warm chords \u00b7 1:06 loop", loopStartMs = 88266, loopEndMs = 154474),
+        Item("stillness", "Stillness", "sampled chords \u00b7 0:11 loop", loopStartMs = 35114, loopEndMs = 46572),
+        Item("morning", "Morning", "guitar \u00b7 0:16 loop", loopStartMs = 10963, loopEndMs = 26628),
+        Item("evening", "Evening", "guitar \u00b7 0:23 loop", loopStartMs = 32212, loopEndMs = 55093),
+        Item("psalter", "Psalter", "synth pads \u00b7 0:15 loop", loopStartMs = 12534, loopEndMs = 27152),
+        Item("vigil", "Vigil", "keys \u00b7 0:55 loop", loopStartMs = 32589, loopEndMs = 87747),
+        Item("upper-room", "Upper Room", "electric piano \u00b7 0:50 loop", loopStartMs = 41804, loopEndMs = 91887),
+        Item("wilderness", "Wilderness", "sparse keys \u00b7 0:39 loop", loopStartMs = 100888, loopEndMs = 140273),
+        Item("shepherd", "Shepherd", "warm chords \u00b7 1:07 loop", loopStartMs = 87425, loopEndMs = 153942),
     )
 
     fun of(name: String): Item? = ALL.firstOrNull { it.name == name }

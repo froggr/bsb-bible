@@ -37,10 +37,18 @@ Two things that procedure assumes you know:
 
       curl -sL https://github.com/froggr/bsb-bible/releases/latest/download/manifest.json
 
-**Do not upload `public/beds/*.opus` blind.** As of 0.32 the local files differ from the
-released ones (`morning.opus` 1.59 MB local vs 226 KB on 0.31) for reasons nobody has
-explained. 0.32 deliberately re-uploaded 0.31's beds instead. Settle which set is correct
-before publishing any bed.
+**`data/beds/` is the real bed set, `public/beds/` is a copy.** They drifted apart before
+0.34 — `public/` still held pre-vocal-removal files, twice the length of the shipped ones,
+which is how the loop points came to be measured against the wrong audio. `data/beds/` matches
+what is on the release. `data/beds/_withvocals/` holds the originals of the three that were
+re-rendered to strip vocals; do not ship those.
+
+**A bed's loop points belong to one exact file.** Re-render the audio and the points are
+scrap. The seam can be measured rather than guessed: decode the file, compare a 300 ms window
+before `loopEndMs` with the window at `loopStartMs`, and take the spectral distance. Under
+about 0.40 sounds continuous; over about 0.75 is an audible jump. `pymusiclooper` proposes
+candidates, but its top-ranked pick is not always the best join — score them yourself and
+slide each endpoint a few hundred ms to settle it. Never crossfade a loop join.
 
 ## Verify on a device before claiming it works
 
