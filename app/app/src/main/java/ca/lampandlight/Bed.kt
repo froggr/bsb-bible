@@ -351,10 +351,14 @@ object Beds {
     /**
      * A bed, and where its seamless loop lives inside the file.
      *
-     * [loopStartMs] to [loopEndMs] is a region whose end genuinely continues into its start —
-     * found by PyMusicLooper, which searches for matching points rather than guessing. The
-     * audio before [loopStartMs] is the track's run-in: played once, then never again, which
-     * is why the loop must NOT be crossfaded back into it.
+     * [loopStartMs] to [loopEndMs] is a region whose end genuinely continues into its start.
+     * It is a WHOLE NUMBER OF BARS, on the track's own beat grid — a loop that measures well
+     * but ends mid-bar still lurches, because the ear is counting. `data/loop_points.py`
+     * finds the grid and picks the bar-exact region with the cleanest join; the bar count is
+     * noted against each entry below.
+     *
+     * The audio before [loopStartMs] is the track's run-in: played once, then never again,
+     * which is why the loop must NOT be crossfaded back into it.
      */
     data class Item(
         val name: String,
@@ -365,14 +369,14 @@ object Beds {
     )
 
     val ALL = listOf(
-        Item("stillness", "Stillness", "sampled chords \u00b7 0:11 loop", loopStartMs = 35114, loopEndMs = 46572),
-        Item("morning", "Morning", "guitar \u00b7 0:16 loop", loopStartMs = 10963, loopEndMs = 26628),
-        Item("evening", "Evening", "guitar \u00b7 0:23 loop", loopStartMs = 32212, loopEndMs = 55093),
-        Item("psalter", "Psalter", "synth pads \u00b7 0:15 loop", loopStartMs = 12534, loopEndMs = 27152),
-        Item("vigil", "Vigil", "keys \u00b7 0:55 loop", loopStartMs = 32589, loopEndMs = 87747),
-        Item("upper-room", "Upper Room", "electric piano \u00b7 0:50 loop", loopStartMs = 41804, loopEndMs = 91887),
-        Item("wilderness", "Wilderness", "sparse keys \u00b7 0:39 loop", loopStartMs = 100888, loopEndMs = 140273),
-        Item("shepherd", "Shepherd", "warm chords \u00b7 1:07 loop", loopStartMs = 87425, loopEndMs = 153942),
+        Item("stillness", "Stillness", "sampled chords \u00b7 0:11 loop", loopStartMs = 33901, loopEndMs = 45047),   // 4 bars
+        Item("morning", "Morning", "guitar \u00b7 0:17 loop", loopStartMs = 9961, loopEndMs = 26587),   // 6 bars
+        Item("evening", "Evening", "guitar \u00b7 0:11 loop", loopStartMs = 3640, loopEndMs = 14925),   // 8 bars
+        Item("psalter", "Psalter", "synth pads \u00b7 0:42 loop", loopStartMs = 12823, loopEndMs = 55200),   // 24 bars
+        Item("vigil", "Vigil", "keys \u00b7 1:09 loop", loopStartMs = 62198, loopEndMs = 130767),   // 20 bars
+        Item("upper-room", "Upper Room", "electric piano \u00b7 1:15 loop", loopStartMs = 668, loopEndMs = 75413),   // 24 bars
+        Item("wilderness", "Wilderness", "sparse keys \u00b7 1:32 loop", loopStartMs = 51321, loopEndMs = 143458),   // 56 bars
+        Item("shepherd", "Shepherd", "warm chords \u00b7 1:39 loop", loopStartMs = 50376, loopEndMs = 149687),   // 36 bars
     )
 
     fun of(name: String): Item? = ALL.firstOrNull { it.name == name }

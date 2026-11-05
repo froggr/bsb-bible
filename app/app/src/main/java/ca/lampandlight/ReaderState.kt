@@ -496,9 +496,26 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
      * out: "Psalm 27 verse 1" read aloud is a string of numbers, not something to listen to.
      */
     fun narrationLines(): List<Narrator.Line> = buildList {
+        // A heading belongs to the verse BELOW it, which has not been seen yet when the
+        // heading goes by — hold it and hand it to the next verse as its preamble. Without
+        // this the voice read straight past "Paying Taxes to Caesar" into the verse, and the
+        // listener lost the one cue that a new passage had started.
+        var pendingHeading: String? = null
         rows.forEach { row ->
             when (row) {
-                is Row.Verse -> add(Narrator.Line(row.index, row.words, row.verse.text))
+                is Row.Heading -> {
+                    pendingHeading = pendingHeading?.let { "$it. ${row.text}" } ?: row.text
+                }
+                is Row.Verse -> {
+                    val head = pendingHeading
+                    pendingHeading = null
+                    if (head != null) {
+                        // Its own line, so it is spoken before the verse and the highlight
+                        // has not started running yet.
+                        add(Narrator.Line(row.index, splitWords(head), head, aside = true))
+                    }
+                    add(Narrator.Line(row.index, row.words, row.verse.text))
+                }
                 is Row.Note -> verseIndexOf(row.verse)?.let { v ->
                     add(Narrator.Line(v, splitWords(row.text), row.text,
                         aside = true, preamble = "Your note."))
