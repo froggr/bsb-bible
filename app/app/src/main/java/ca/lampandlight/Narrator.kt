@@ -465,6 +465,9 @@ class Narrator(private val ctx: Context) {
         fun listenable(text: String): String {
             val cite = """(?:[1-3]?\s?[A-Za-z]{2,4}\.?\s*)?\d+:\d+(?:-\d+)?"""
             var t = text
+            // Tyndale's quoted scripture is marked *like this* for the page. The emphasis
+            // is carried by the voice, not by saying "asterisk".
+            t = t.replace("*", "")
             // A parenthesis holding nothing but citations and their separators.
             t = t.replace(Regex("""\(\s*(?:$cite|[;,.\s])+\)"""), "")
             // A bare citation in running text, with any separator trailing it.

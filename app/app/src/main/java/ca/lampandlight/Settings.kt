@@ -136,6 +136,7 @@ fun SettingsScreen(
     bible: Bible,
     narrator: Narrator,
     onClose: () -> Unit,
+    onLayers: () -> Unit = {},
 ) {
     val p = LocalPalette.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -331,6 +332,30 @@ fun SettingsScreen(
                 }
             }
 
+            // Choosing which commentaries show used to be reachable only by long-pressing
+            // the Study button, which nobody can be expected to guess. Same sheet, said out
+            // loud, next to the download it governs.
+            if (layersPresent.second) {
+                Text(
+                    "What shows under each verse",
+                    fontFamily = UiFont, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                    color = p.ink,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onLayers() }
+                        .padding(top = 2.dp, bottom = 4.dp),
+                )
+                Text(
+                    "Pick the commentaries you want \u2014 Tyndale's modern English on its own, " +
+                        "or with Henry and JFB. Also cross-references and translator's notes.",
+                    fontFamily = UiFont, fontSize = 11.sp, lineHeight = 18.sp, color = p.inkSoft,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onLayers() }
+                        .padding(bottom = 18.dp, end = 20.dp),
+                )
+            }
+
             message?.let {
                 Text(
                     it, fontFamily = UiFont, fontSize = 12.sp, color = p.gold,
@@ -429,8 +454,18 @@ private fun LayerRow(
                 title, fontFamily = UiFont, fontSize = 14.sp, fontWeight = FontWeight.Medium,
                 color = p.ink, modifier = Modifier.weight(1f),
             )
-            if (present) Text("Installed", fontFamily = UiFont, fontSize = 11.sp, color = p.inkSoft)
-            else Action("Download", busy, progress, onDownload)
+            // "Installed" used to be the end of it, which stranded anyone who already had
+            // the file: a layer that gained content in a later release could never be
+            // fetched again. Offer the update too.
+            if (present) {
+                Text(
+                    "Installed", fontFamily = UiFont, fontSize = 11.sp, color = p.inkSoft,
+                    modifier = Modifier.padding(end = 10.dp),
+                )
+                Action("Update", busy, progress, onDownload)
+            } else {
+                Action("Download", busy, progress, onDownload)
+            }
         }
         Text(
             detail, fontFamily = UiFont, fontSize = 11.sp, lineHeight = 18.sp, color = p.inkSoft,

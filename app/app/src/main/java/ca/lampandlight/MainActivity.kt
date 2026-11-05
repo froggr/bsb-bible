@@ -366,6 +366,7 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
             bible = bible,
             narrator = narrator,
             onClose = { screen = "read" },
+            onLayers = { layering = true },
         )
     }
 

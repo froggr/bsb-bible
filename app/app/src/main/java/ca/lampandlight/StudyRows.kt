@@ -143,6 +143,32 @@ fun commentaryBody(body: String): String =
     ).trim()
 
 /**
+ * Commentary with Tyndale's quoted scripture set in italic.
+ *
+ * The build marks those spans with `*asterisks*`, which a plain `Text` would draw as
+ * literal asterisks — they have to become real style runs. Henry and JFB carry none, so
+ * they pass through untouched.
+ */
+fun commentaryText(body: String): androidx.compose.ui.text.AnnotatedString {
+    val clean = commentaryBody(body)
+    if (!clean.contains('*')) return androidx.compose.ui.text.AnnotatedString(clean)
+    return androidx.compose.ui.text.buildAnnotatedString {
+        var i = 0
+        while (true) {
+            val open = clean.indexOf('*', i)
+            if (open < 0) { append(clean.substring(i)); break }
+            val close = clean.indexOf('*', open + 1)
+            if (close < 0) { append(clean.substring(i)); break }
+            append(clean.substring(i, open))
+            pushStyle(androidx.compose.ui.text.SpanStyle(fontStyle = FontStyle.Italic))
+            append(clean.substring(open + 1, close))
+            pop()
+            i = close + 1
+        }
+    }
+}
+
+/**
  * The commentaries, plainest first — the order they appear in and can be switched off in.
  */
 private val COMMENTARIES = listOf(
@@ -204,7 +230,7 @@ fun CommentRow(source: String, body: String, onSpeak: (() -> Unit)? = null) {
             }
             Spacer(Modifier.height(5.dp))
             androidx.compose.material3.Text(
-                commentaryBody(body),
+                commentaryText(body),
                 fontFamily = ReadingFont,
                 fontSize = (14 * LocalTextScale.current).sp,
                 lineHeight = (23.5 * LocalTextScale.current).sp,
