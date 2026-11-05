@@ -1,6 +1,6 @@
 # Status
 
-Last updated 2026-11-05, release **0.31**.
+Last updated 2026-11-05, release **0.32**.
 
 Install / share: <https://github.com/froggr/bsb-bible/releases/latest>
 
@@ -10,13 +10,22 @@ Install / share: <https://github.com/froggr/bsb-bible/releases/latest>
 |---|---|
 | Reading, marks, notes, study mode | In use daily |
 | Read-aloud with phrase highlight | In use; gapless after the one-clause lookahead fix |
-| Music beds, intro-then-loop | PCM loop via AudioTrack. Two consecutive 22.304s passes took 22.175s and 22.441s of wall clock, playback head never stalled |
+| Music beds, intro-then-loop | PCM loop via AudioTrack, **verified on `stillness` only**. Two consecutive 22.304s passes took 22.175s and 22.441s of wall clock, playback head never stalled. The other seven have bad loop points — see Known broken |
 | Bed rotation | All 8 played once, reshuffled, no back-to-back repeat |
 | Self-update from GitHub | Full chain tested with the local server **stopped**: APK downloaded, installed, Check reported "Up to date", beds downloaded and played |
 | Release signing | `CN=BSB Bible`, valid to 2056; every build (debug included) uses it |
 | Beds vocal-free | Vocal stem separated with demucs: all 8 at −62 dB or quieter |
+| Commentary in modern English | Tyndale Open Study Notes (2022) built in: 16,729 notes over 28,851 of 31,086 verses, all 66 books. Shipped in 0.32 |
+| Per-commentary switches | Each of the three commentaries has its own switch under *Commentary* in the study-layers sheet. **Compiles and the SQL ordering is verified; not yet seen on a phone** |
 
 ## Known broken / unfinished
+
+- **Bed loop points are wrong on seven of the eight.** Only `stillness` loops cleanly. The
+  rest jump back to a point far too early in the track, so the join is audible and the piece
+  restarts before it has gone anywhere. The loop machinery itself is sound — `stillness`
+  proves that — so this is the per-bed loop points, not the player: they were measured for
+  one track and never redone for the others. `pymusiclooper` finds the points; the note in
+  `README.md` on never crossfading a loop join still stands. Next session's job.
 
 - **Press-and-drag verse selection.** Rewritten to a single `awaitEachGesture` in 0.24 after
   three failed attempts. Taps and the verse menu are verified; **the drag itself has never been

@@ -22,7 +22,7 @@ known broken.
 | `data/bible-reading.db` | 8.8 MB: verse text, footnotes, marks, search. **This is what ships in the APK** |
 | `data/bible-core.db` | 77 MB: text plus the word layer and cross-references. Build input, not shipped |
 | `data/bible-study.db` | 68 MB: Strong's and cross-references. Downloaded on request (20 MB gzipped) |
-| `data/bible-commentary.db` | 34 MB: Matthew Henry + JFB. Downloaded on request (11 MB gzipped) |
+| `data/bible-commentary.db` | 39 MB: Tyndale + Matthew Henry + JFB. Downloaded on request (13 MB gzipped) |
 | `data/beds/` | The music beds that SHIP. Not a source directory — see below |
 | `data/beds/_withvocals/` | Untouched originals for stillness, psalter, evening |
 | `public/beds/` | Untouched originals for morning, shepherd, vigil, upper-room, wilderness |
@@ -70,10 +70,24 @@ Everything is public domain or CC-BY, and all of it is verified as downloading.
 | `a.openbible.info/data/cross-references.zip` | 8.3 MB | 344,800 cross-references ranked by vote |
 | `crosswire.org/ftpmirror/pub/sword/packages/rawzip/MHC.zip` | 15 MB | Matthew Henry (1710), whole Bible |
 | `…/rawzip/JFB.zip` | 6.3 MB | Jamieson-Fausset-Brown (1871), whole Bible |
+| `tyndaleopenresources.com/…/tyndale_open-studynotes.zip` | 2.9 MB | Tyndale Open Study Notes (2022), whole Bible |
 
 BSB text is CC0. Cross-references need the line
-`Cross-references from OpenBible.info, CC-BY`. Both commentaries declare
+`Cross-references from OpenBible.info, CC-BY`. Henry and JFB declare
 `DistributionLicense=Public Domain` in their own module config.
+
+**Tyndale is CC BY-SA 4.0, not public domain** — the only source here with a condition
+attached. It needs the attribution the Settings About block carries:
+`Tyndale Open Study Notes © 2022 Tyndale House Publishers, CC BY-SA 4.0, available free at
+tyndaleopenresources.com.` Modify the notes and the licence also wants the change stated and
+the wording "Adapted from Tyndale Open Study Notes…" — see `data/src/x_TYN/_README.txt`,
+which ships with the download. Keep that file.
+
+Why a third commentary at all: Henry and JFB explain the text in the prose of their own
+centuries — Roman-numeral verse references, nested `I. / 1. / (1.)` outlines, providence as
+"physic works upon the body". Tyndale is the open release of the NLT Study Bible apparatus and
+explains the same verse in today's English, so it reads first. All three are kept, because
+Tyndale is silent where the older two are not — Romans 8:28 has no Tyndale note.
 
 Notes on the data, learned the hard way:
 
@@ -85,6 +99,16 @@ Notes on the data, learned the hard way:
   Greek article). Worth showing in study view, worth hiding in reading view.
 - Matthew Henry comments on *passages*, so several verses share one entry, and each entry
   opens by re-quoting the KJV text — strip that, the reader already has the text on screen.
+- Tyndale's `<item name=…>` is **not** a usable key: it spells books in Roman numerals
+  (`IJn`, `IISam`, `IKgs`). The `<refs>` child carries the canonical form (`1Jn.1.1-4`) — key
+  off that. Its own abbreviations still need mapping (`Pr`→`Prov`, `Hagg`→`Hag`).
+- 37% of Tyndale's notes cover a *range*, and a range can cross a chapter (`Ps.23.1-28.9`).
+  Each note is attached to every verse in its range and the **narrowest note wins**, so
+  Psalm 23:1 gets its own note rather than a 265-verse overview. Keying only the first verse
+  of each range leaves coverage at 48%; expanding gets it to 93%.
+- Tyndale marks quoted scripture with `class="sn-excerpt"`. Convert those to `*emphasis*`
+  using sentinel characters, *then* collapse whitespace — do it the other way round and the
+  whitespace pass strands the `*` away from the word it belongs to.
 - CCEL's XML downloads are zero bytes; CrossWire's `ftpmirror` is the working source.
 
 ## The app
