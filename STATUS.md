@@ -1,6 +1,6 @@
 # Status
 
-Last updated 2026-11-05, release **0.32**.
+Last updated 2026-11-05, release **0.33**.
 
 Install / share: <https://github.com/froggr/bsb-bible/releases/latest>
 
@@ -16,7 +16,8 @@ Install / share: <https://github.com/froggr/bsb-bible/releases/latest>
 | Release signing | `CN=BSB Bible`, valid to 2056; every build (debug included) uses it |
 | Beds vocal-free | Vocal stem separated with demucs: all 8 at −62 dB or quieter |
 | Commentary in modern English | Tyndale Open Study Notes (2022) built in: 16,729 notes over 28,851 of 31,086 verses, all 66 books. Shipped in 0.32 |
-| Per-commentary switches | Each of the three commentaries has its own switch under *Commentary* in the study-layers sheet. **Compiles and the SQL ordering is verified; not yet seen on a phone** |
+| Per-commentary switches | Verified on the emulator in 0.33: the three switches render under *Commentary*, Henry and JFB off leaves only Tyndale on the page, and the choice survives a reinstall. Reachable from Settings → *What shows under each verse*, not only by long-pressing Study |
+| Updating a data layer | Verified: the commentary row offers **Update** when already installed, and the 39 MB layer with Tyndale replaced the old one |
 
 ## Known broken / unfinished
 
