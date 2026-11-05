@@ -3,12 +3,11 @@
 An offline study Bible for Android: the Berean Standard Bible, read aloud in a natural voice,
 with highlights, notes and study material that sits inline with the text.
 
-Built with AI — "vibe coded". I described what I wanted and Claude wrote it, with me testing
-on a real phone and sending it back when it was wrong. Worth knowing before you install it:
-nobody has audited this code, and the bugs it has are the kind that come from being built fast
-rather than carefully. It is a personal project I use daily, shared because friends asked.
+I vibe this mainly with fable 5.1 and opus 5.5. played architect,PM, and QA. This is a personal app and felt to share of it helps others. if you don't like the implementation or code then complain to anthropic. 
 
-The Bible text itself is not AI-generated — it is the Berean Standard Bible, unmodified.
+The Bible text is the Berean Standard Bible, unmodified.
+
+This readme may be slop 🤷 oh well. 😁
 
 ## Install
 
