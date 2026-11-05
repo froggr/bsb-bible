@@ -1,0 +1,18 @@
+# Build output
+app/build/
+app/app/build/
+app/.gradle/
+app/local.properties
+__pycache__/
+*.pyc
+
+# The signing key and its passwords: irreplaceable, never in git.
+app/keystore/
+app/keystore.properties
+
+# Built databases and source corpora — rebuilt by data/build.py, too big for git.
+data/*.db
+data/*.db.gz
+data/src/
+public/data/
+public/app.apk

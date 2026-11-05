@@ -1,0 +1,973 @@
+package ca.lampandlight
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.BaselineShift
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+
+/* The reading screen. One column, nothing between the reader and the text: the chrome
+   fades out while the eye is moving and comes back on a tap. */
+
+@Composable
+fun Reader(
+    bible: Bible,
+    narrator: Narrator,
+    state: ReaderState,
+    onOpenPicker: () -> Unit,
+    onOpenStudy: (VerseId, Int?) -> Unit,
+    onSearch: () -> Unit,
+    onMenu: () -> Unit,
+    selection: Set<VerseId>,
+    onSelect: (VerseId) -> Unit,
+    onBookmark: (VerseId) -> Unit,
+    onOpenVerse: (VerseId, Int) -> Unit,
+    onReadFrom: (Int) -> Unit,
+    onStudyLayers: () -> Unit,
+    /** Press-and-drag selection: start on a verse, extend, then mark on release. */
+    onDragStart: (VerseId) -> Unit,
+    onDragTo: (VerseId) -> Unit,
+    onDragEnd: () -> Unit,
+    /** The span under the finger right now, so it can be seen as it is dragged out. */
+    dragSpan: Pair<VerseId, VerseId>?,
+    bed: Bed,
+    prefs: Prefs,
+) {
+    val p = LocalPalette.current
+    val list = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var chromeVisible by remember { mutableStateOf(true) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    var topBarPx by remember { mutableIntStateOf(0) }
+    var playerPx by remember { mutableIntStateOf(0) }
+    // Until the bars have been measured, fall back to a height that is certainly enough;
+    // starting at zero clips the first and last verses on the first frame.
+    val topBarHeight = with(density) { topBarPx.toDp() }.coerceAtLeast(64.dp)
+    val playerHeight = with(density) { playerPx.toDp() }.coerceAtLeast(96.dp)
+
+    val verses = state.verses
+    val book = bible.books.getOrNull(state.book - 1)
+
+    // Hide the chrome only when the reader drags the page, never when narration scrolls it
+    // for them — and never while it is reading, since that is when the player is wanted.
+    val dragging by remember {
+        derivedStateOf { list.interactionSource.let { _ -> list.isScrollInProgress } }
+    }
+    LaunchedEffect(dragging, narrator.speaking) {
+        if (dragging && !narrator.speaking) chromeVisible = false
+    }
+    // Reading down hides the bars; reaching back up is the gesture for wanting them again,
+    // the way a reader lifts their eyes. They also return once the page comes to rest.
+    LaunchedEffect(list) {
+        var last = 0
+        snapshotFlow { list.firstVisibleItemIndex * 10_000 + list.firstVisibleItemScrollOffset }
+            .collect { now ->
+                if (now < last - 24) chromeVisible = true
+                last = now
+            }
+    }
+    LaunchedEffect(list) {
+        snapshotFlow { list.isScrollInProgress }.collect { moving ->
+            if (!moving) chromeVisible = true
+        }
+    }
+    // Reading always brings the player back.
+    LaunchedEffect(narrator.speaking) {
+        if (narrator.speaking) chromeVisible = true
+    }
+
+    // Remember what is at the top of the screen, so going back returns to the place in the
+    // chapter rather than to its first verse.
+    LaunchedEffect(list) {
+        snapshotFlow { list.firstVisibleItemIndex }.collect { i ->
+            (state.rows.getOrNull(i) as? Row.Verse)?.let { state.topVerse = it.index }
+        }
+    }
+
+    // Land on the verse a jump asked for, once the new chapter has been laid out.
+    LaunchedEffect(state.rows, state.pending) {
+        val want = state.pending
+        if (want <= 0 || state.rows.isEmpty()) return@LaunchedEffect
+        val target = state.rowOfVerse(want)
+        state.consumePending()
+        if (target >= 0) list.scrollToItem(target, -120)
+    }
+
+    // Follow the narration, but only when the verse has actually left the comfortable part
+    // of the screen: scrolling on every verse drags the page out from under the reader.
+    LaunchedEffect(narrator.verseIndex) {
+        val i = narrator.verseIndex
+        if (i < 0 || i >= verses.size) return@LaunchedEffect
+        val target = state.rowOfVerse(i)
+        if (target < 0) return@LaunchedEffect
+        val info = list.layoutInfo
+        val item = info.visibleItemsInfo.firstOrNull { it.index == target }
+        val top = info.viewportStartOffset
+        val bottom = info.viewportEndOffset
+        val needs = item == null ||
+            item.offset < top + 40 ||
+            item.offset + item.size > bottom - 260
+        if (needs) list.animateScrollToItem(target, -200)
+    }
+
+    /**
+     * Which verse sits under a point on screen, from the list's own layout.
+     *
+     * Asking the list rather than each row means the answer is right even when the finger
+     * passes over a commentary block, and it costs nothing per verse to draw.
+     */
+    // Where the list sits in the window, so a position reported by a verse (which knows only
+    // its own coordinates) can be compared against the list's layout. Measuring this instead
+    // of assuming the two frames agree is the whole fix: the drag detector used to live on the
+    // LazyColumn, whose top edge is the OUTER edge of the content padding, while item offsets
+    // are measured from the content. The two differ by the top bar's height, which is exactly
+    // the one-or-two-verse drift.
+    var listTopInWindow by remember { mutableFloatStateOf(0f) }
+
+    fun verseAtContent(y: Float): VerseId? {
+        val info = list.layoutInfo
+        // [y] is in the list's CONTENT space, the same space as item offsets (measured on
+        // device: rows above the viewport read negative, e.g. -582, and the row at the padding
+        // edge reads +120). Do not add viewportStartOffset — that double-counts the padding.
+        // Test CONTAINMENT. `lastOrNull { offset <= y }` has no notion of being inside a row,
+        // and the last visible row satisfies it for any y below it.
+        val item = info.visibleItemsInfo.firstOrNull { y < it.offset + it.size }
+            // Past the last laid-out row — hold the span at the bottom instead of dropping it,
+            // so dragging into the player bar does not snap the selection back.
+            ?: info.visibleItemsInfo.lastOrNull()
+            ?: return null
+        return (state.rows.getOrNull(item.index) as? Row.Verse)?.verse?.id
+            // A commentary or note row belongs to the verse above it, so dragging across
+            // one goes on extending the span instead of stalling.
+            ?: state.rows.take(item.index + 1).filterIsInstance<Row.Verse>().lastOrNull()?.verse?.id
+    }
+
+    /** The verse under a point given in WINDOW coordinates. */
+    fun verseAtWindow(windowY: Float): VerseId? = verseAtContent(windowY - listTopInWindow)
+
+    Box(Modifier.fillMaxSize().background(p.paper)) {
+        LazyColumn(
+            state = list,
+            modifier = Modifier
+                .fillMaxSize()
+                .onGloballyPositioned { listTopInWindow = it.positionInWindow().y },
+            // Reserve the bars' real heights so the text scrolls clear of them instead of
+            // sliding underneath. Guessed numbers are wrong on a phone with a cutout.
+            contentPadding = PaddingValues(
+                start = 13.dp,
+                end = 13.dp,
+                top = topBarHeight + 14.dp,
+                bottom = playerHeight + 22.dp,
+            ),
+        ) {
+            items(state.rows, key = { it.key }) { row ->
+                when (row) {
+                    is Row.Heading -> SectionHeading(row.text)
+                    is Row.Title -> PsalmTitle(row.text)
+                    is Row.Verse -> VerseBlock(
+                        row = row,
+                        narratingSpan = if (narrator.verseIndex == row.index) narrator.wordSpan else null,
+                        reading = narrator.verseIndex == row.index,
+                        mark = state.markOf(row.verse.id),
+                        markedWords = state.markedWords(row.verse.id, row.words.size)?.first,
+                        noted = state.hasNote(row.verse.id),
+                        // The selection is a range: its two ends, and everything between.
+                        selected = dragSpan?.let { (a, b) ->
+                            row.verse.id >= minOf(a, b) && row.verse.id <= maxOf(a, b)
+                        } ?: (selection.isNotEmpty() &&
+                            row.verse.id >= selection.min() && row.verse.id <= selection.max()),
+                        selecting = selection.isNotEmpty() || dragSpan != null,
+                        // Tapping the number keeps the verse straight away. The sheet, on a
+                        // long press, is where the colour and the note live.
+                        onTapVerse = { onBookmark(row.verse.id) },
+                        onTapWord = { w ->
+                            chromeVisible = true
+                            if (selection.isEmpty()) onOpenStudy(row.verse.id, w)
+                            else onSelect(row.verse.id)
+                        },
+                        onLongPress = { onOpenVerse(row.verse.id, row.index) },
+                        onReadFrom = { chromeVisible = true; onReadFrom(row.index) },
+                        // The drag starts on THIS verse — no hit-test needed for the anchor,
+                        // so the end the finger started on is never guessed wrong.
+                        onMarkStart = { chromeVisible = true; onDragStart(row.verse.id) },
+                        onMarkTo = { windowY -> verseAtWindow(windowY)?.let { onDragTo(it) } },
+                        onMarkEnd = onDragEnd,
+                    )
+                    // Tapping a note opens the sheet it was written in, so reading one and
+                    // editing it are the same gesture.
+                    is Row.Note -> NoteRow(row.text, row.colour) {
+                        onOpenVerse(row.verse, state.rowOfVerse(0).coerceAtLeast(0))
+                    }
+                    is Row.Footnote -> FootnoteRow(row.text)
+                    is Row.Comment -> CommentRow(row.source, row.body)
+                    is Row.Refs -> RefsRow(
+                        row.refs.map { r ->
+                            val lbl = bible.reference(r.dst).let { base ->
+                                if (r.dstEnd != null && r.dstEnd != r.dst)
+                                    base + "-" + (r.dstEnd % 1000)
+                                else base
+                            }
+                            lbl to r.dst
+                        },
+                        // Following a reference leaves a breadcrumb in the top bar, so a
+                        // chain of them can be walked back out of.
+                        onGo = { target ->
+                            narrator.stop()
+                            state.go(target.book, target.chapter, at = target.verse)
+                        },
+                    )
+                }
+            }
+            item("end") { Spacer(Modifier.height(40.dp)) }
+        }
+
+        // The list's top padding has to match the bar's RESTING height. Measuring the
+        // visible bar gets this wrong twice over: onSizeChanged keeps firing as it slides
+        // away, and taking only the maximum (the old `if (height > topBarPx)`) locks in the
+        // tallest state forever — so after the back line disappears the padding stays too
+        // tall, the content sits lower than the padding claims, and every verse under the
+        // finger reads a couple too far down. That was the selection drift.
+        // An invisible copy is never mid-animation, so its height is always the true one.
+        Box(
+            Modifier.align(Alignment.TopCenter)
+                // Measured, laid out, never drawn and never touched: it must not steal the
+                // taps or the drag that belong to the first verse underneath it.
+                .onSizeChanged { topBarPx = it.height }
+                .drawWithContent { }
+                .pointerInput(Unit) { },
+        ) {
+            TopBar(
+                label = "${book?.name ?: ""} ${state.chapter}",
+                onPick = {}, onPrev = {}, onNext = {}, onSearch = {}, onMenu = {},
+                backTo = state.backLabel(), onBack = {},
+                study = state.study, studyBusy = state.studyLoading,
+                onStudy = {}, onStudyLayers = {},
+            )
+        }
+
+        // ---- top bar: reference and a way out ----
+        AnimatedVisibility(
+            visible = chromeVisible,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            TopBar(
+                label = "${book?.name ?: ""} ${state.chapter}",
+                onPick = onOpenPicker,
+                onPrev = { scope.launch { state.previousChapter() } },
+                onNext = { scope.launch { state.nextChapter() } },
+                onSearch = onSearch,
+                onMenu = onMenu,
+                backTo = state.backLabel(),
+                onBack = { narrator.reset(); state.back() },
+                study = state.study,
+                studyBusy = state.studyLoading,
+                onStudy = {
+                    state.chooseStudy(!state.study)
+                    prefs.study = state.study; prefs.save()
+                },
+                onStudyLayers = { onStudyLayers() },
+            )
+        }
+
+        // ---- player ----
+        AnimatedVisibility(
+            visible = chromeVisible || narrator.speaking,
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier.align(Alignment.BottomCenter)
+                .onSizeChanged { if (it.height > playerPx) playerPx = it.height },
+        ) {
+            PlayerBar(narrator, state, bed, prefs)
+        }
+
+        // Bringing the chrome back must never cost a scroll. A full-screen catcher used to
+        // sit here and swallow the first drag after hiding, so the page refused to move
+        // until it had been tapped — the list keeps its own touches now, and the bars come
+        // back when the reader stops dragging or pulls back up the page.
+    }
+}
+
+@Composable
+private fun SectionHeading(text: String) {
+    val p = LocalPalette.current
+    Text(
+        text = text,
+        fontFamily = DisplayFont,
+        fontSize = 17.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 1.6.sp,
+        color = p.gold,
+        modifier = Modifier.padding(top = 38.dp, bottom = 14.dp),
+    )
+}
+
+@Composable
+private fun PsalmTitle(text: String) {
+    val p = LocalPalette.current
+    Column {
+        Text(
+            text = text,
+            fontFamily = ReadingFont,
+            fontStyle = FontStyle.Italic,
+            fontSize = 15.sp,
+            color = p.inkSoft,
+            modifier = Modifier.padding(bottom = 14.dp),
+        )
+        Box(Modifier.fillMaxWidth().height(1.dp).background(p.rule))
+        Spacer(Modifier.height(20.dp))
+    }
+}
+
+/**
+ * One verse.
+ *
+ * The verse is drawn as a single paragraph so it wraps and justifies like prose; the word
+ * being narrated is marked inside that paragraph rather than by splitting it into separate
+ * views, which would break line breaking and kerning.
+ */
+@Composable
+private fun VerseBlock(
+    row: Row.Verse,
+    narratingSpan: IntRange?,
+    reading: Boolean,
+    mark: MarkColor?,
+    /** Which words of this verse the mark covers, when it does not cover all of them. */
+    markedWords: IntRange?,
+    noted: Boolean,
+    selected: Boolean,
+    selecting: Boolean,
+    onTapVerse: () -> Unit,
+    onTapWord: (Int) -> Unit,
+    onLongPress: () -> Unit,
+    /** Long press that turned into a drag: mark from here. */
+    onMarkStart: () -> Unit = {},
+    /** Extend the span to whatever verse is at this y, in WINDOW coordinates. */
+    onMarkTo: (Float) -> Unit = {},
+    onMarkEnd: () -> Unit = {},
+    onReadFrom: () -> Unit,
+) {
+    val p = LocalPalette.current
+    val scale = LocalTextScale.current
+    val indigo = p.indigo
+    val glow by animateFloatAsState(if (reading) 1f else 0f, label = "reading")
+
+    // Does the mark stop short of covering the whole verse? Decides whether the colour goes
+    // on the words or on the block behind them.
+    val partialMark = markedWords != null &&
+        (markedWords.first > 0 || markedWords.last < row.words.lastIndex)
+
+    val body = buildAnnotatedString {
+        pushStringAnnotation("num", "1")
+        withStyle(SpanStyle(
+            color = p.gold, fontSize = 11.sp * scale, fontFamily = UiFont,
+            fontWeight = FontWeight.SemiBold, baselineShift = BaselineShift(0.42f),
+            letterSpacing = 0.5.sp,
+        )) { append("${row.verse.id.verse}  ") }
+        pop()
+
+        // A mark that covers only part of the verse is painted on its words. One that covers
+        // the whole verse tints the block instead, which reads more calmly down a page.
+        val partial = partialMark
+        // Lighter than the old per-word band: this covers a whole clause, so the same
+        // strength would shout.
+        val litColour = p.gold.copy(alpha = if (p.dark) 0.22f else 0.17f)
+        val marked = mark?.color(p.dark)?.copy(alpha = if (p.dark) 0.5f else 0.75f)
+
+        row.words.forEachIndexed { i, w ->
+            val lit = narratingSpan?.contains(i) == true
+            val inMark = partial && markedWords != null && i in markedWords
+            pushStringAnnotation("w", i.toString())
+            withStyle(SpanStyle(
+                background = when {
+                    lit -> litColour
+                    inMark && marked != null -> marked
+                    else -> Color.Transparent
+                },
+                color = p.ink,
+            )) { append(w) }
+            pop()
+            // The space between two marked words is marked too, so the band is unbroken.
+            if (i < row.words.lastIndex) {
+                val bridge = inMark && markedWords != null && (i + 1) in markedWords
+                val litBridge = lit && narratingSpan?.contains(i + 1) == true
+                when {
+                    litBridge -> withStyle(SpanStyle(background = litColour)) { append(" ") }
+                    bridge && marked != null ->
+                        withStyle(SpanStyle(background = marked)) { append(" ") }
+                    else -> append(" ")
+                }
+            }
+        }
+    }
+
+    // The padding is constant and the background only fades in: adding padding when a verse
+    // starts being read reflowed every verse below it, which is what made the page shift.
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 17.dp)
+            .background(
+                when {
+                    selected -> p.gold.copy(alpha = 0.18f)
+                    mark != null && !partialMark ->
+                        mark.color(p.dark).copy(alpha = if (p.dark) 0.5f else 0.75f)
+                    else -> p.sunk.copy(alpha = glow * 0.5f)
+                },
+                RoundedCornerShape(5.dp),
+            )
+            .then(
+                if (selected) Modifier.border(
+                    1.5.dp, p.gold, RoundedCornerShape(5.dp)) else Modifier
+            )
+            .then(
+                // A verse you have written on carries a rule in the margin.
+                if (noted) Modifier.drawBehind {
+                    drawRect(
+                        color = indigo,
+                        topLeft = androidx.compose.ui.geometry.Offset(0f, 4f),
+                        size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height - 8f),
+                    )
+                } else Modifier
+            )
+            .padding(horizontal = 9.dp, vertical = 5.dp)
+    ) {
+        // Two detectors, deliberately split: taps below, long-press-and-drag last (it has to
+        // be last to receive the pointer first). ClickableText would swallow the long press.
+        var layout by remember(row.key) {
+            mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null)
+        }
+        // Where this verse's text sits in the window, so a touch inside it can be expressed
+        // in a frame the list's layout also understands.
+        var layoutTop by remember(row.key) { mutableStateOf<Float?>(null) }
+        // Double tap is detected by hand, because the one gesture loop below owns the whole
+        // pointer stream: remember when and where the last tap landed.
+        val lastTap = remember(row.key) { longArrayOf(0L) }
+        Text(
+            text = body,
+            fontFamily = ReadingFont,
+            fontWeight = FontWeight.Light,
+            fontSize = 19.sp * scale,
+            lineHeight = 34.sp * scale,
+            color = p.ink,
+            onTextLayout = { layout = it },
+            modifier = Modifier
+                .onGloballyPositioned { layoutTop = it.positionInWindow().y }
+                // ONE gesture loop for everything this verse does: tap, double tap, long
+                // press, and long-press-then-drag.
+                //
+                // It has to be one, not two chained pointerInput blocks. detectTapGestures
+                // consumes the initial `down` unconditionally, and a consumed change makes
+                // awaitLongPressOrCancellation give up — so a tap detector and a drag
+                // detector on the same composable can never share a long press, whichever
+                // order they are declared in. (Declaration order does matter, confusingly:
+                // on the Main pass the LAST-declared block receives events FIRST. Chasing
+                // that ordering was a dead end; both arrangements break something.)
+                //
+                // This is the shape Compose's own text selection uses: await the down, await
+                // the long press, then drag.
+                .pointerInput(row.key) {
+                    val slop = 12.dp.toPx()
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        // A long press that never moves means the menu; one that travels
+                        // marks a range. Deciding here, from one stream of events, is what
+                        // stops a single press from doing both — the stray highlight.
+                        val press = awaitLongPressOrCancellation(down.id)
+                        if (press == null) {
+                            // No long press: it was a tap (or a scroll took the gesture).
+                            // Resolve the tap against the text, as before.
+                            val up = currentEvent.changes.firstOrNull { it.changedToUp() }
+                            if (up != null) {
+                                val now = System.currentTimeMillis()
+                                if (now - lastTap[0] < 280) {
+                                    // Second tap in quick succession: read from this verse.
+                                    lastTap[0] = 0L
+                                    onReadFrom()
+                                } else {
+                                    lastTap[0] = now
+                                    val l = layout
+                                    if (l != null) {
+                                        val off = l.getOffsetForPosition(up.position)
+                                        val num = body.getStringAnnotations("num", off, off).firstOrNull()
+                                        val word = body.getStringAnnotations("w", off, off).firstOrNull()
+                                        when {
+                                            num != null -> onTapVerse()
+                                            word != null -> onTapWord(word.item.toInt())
+                                        }
+                                    }
+                                }
+                            }
+                            return@awaitEachGesture
+                        }
+                        var marking = false
+                        var travelled = 0f
+                        drag(press.id) { change ->
+                            if (!marking) {
+                                travelled += change.positionChange().getDistance()
+                                if (travelled < slop) return@drag
+                                marking = true
+                                onMarkStart()
+                            }
+                            // Window coordinates: this verse's own frame means nothing to
+                            // the list's layout.
+                            onMarkTo(change.position.y + (layoutTop ?: 0f))
+                            change.consume()
+                        }
+                        if (marking) onMarkEnd() else onLongPress()
+                    }
+                },
+        )
+    }
+}
+
+@Composable
+private fun TopBar(
+    label: String,
+    onPick: () -> Unit,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+    onSearch: () -> Unit,
+    onMenu: () -> Unit,
+    /** Where following a link would return to, named; null when nothing was followed. */
+    backTo: String?,
+    onBack: () -> Unit,
+    study: Boolean,
+    studyBusy: Boolean,
+    onStudy: () -> Unit,
+    onStudyLayers: () -> Unit,
+) {
+    val p = LocalPalette.current
+    Surface(color = p.paper, shadowElevation = 0.dp) {
+        Column {
+            Row(
+                Modifier.fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Chip("\u2039", onPrev)
+                Spacer(Modifier.width(7.dp))
+                Surface(
+                    onClick = onPick,
+                    color = Color.Transparent,
+                    shape = RoundedCornerShape(9.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, p.rule),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        label,
+                        fontFamily = DisplayFont,
+                        fontSize = 21.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = p.ink,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(vertical = 7.dp),
+                    )
+                }
+                Spacer(Modifier.width(7.dp))
+                Chip("\u203a", onNext)
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Named, because "back" alone does not say where: after three links the
+                // reader has lost the thread without it. Search stays reachable alongside.
+                if (backTo != null) {
+                    TextAction("‹ $backTo", onBack)
+                    Spacer(Modifier.width(16.dp))
+                }
+                TextAction("Search", onSearch)
+                Spacer(Modifier.weight(1f))
+                // Study sits with the reading, not in settings: it is a way of reading the
+                // page rather than a preference, and it gets switched on and off mid-chapter.
+                StudyToggle(study, studyBusy, onStudy, onStudyLayers)
+                Spacer(Modifier.width(16.dp))
+                TextAction("Marks & settings", onMenu)
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(p.rule))
+        }
+    }
+}
+
+/**
+ * The study switch.
+ *
+ * Lit when on, so the state is visible without reading the word — the page changes under it
+ * and the reader should be able to see why at a glance. A long press opens which layers are
+ * shown, keeping the common action (on, off) to a single tap.
+ */
+@Composable
+private fun StudyToggle(
+    on: Boolean,
+    busy: Boolean,
+    onToggle: () -> Unit,
+    onLayers: () -> Unit,
+) {
+    val p = LocalPalette.current
+    val bg by animateColorAsState(
+        if (on) p.gold.copy(alpha = if (p.dark) 0.22f else 0.17f) else Color.Transparent,
+        label = "studyBg",
+    )
+    val fg by animateColorAsState(if (on) p.gold else p.inkSoft, label = "studyFg")
+    Surface(
+        color = bg,
+        shape = RoundedCornerShape(5.dp),
+        modifier = Modifier.pointerInput(on) {
+            detectTapGestures(onTap = { onToggle() }, onLongPress = { onLayers() })
+        },
+    ) {
+        Row(
+            Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Study",
+                fontFamily = UiFont, fontSize = 11.5.sp, fontWeight = FontWeight.Medium,
+                letterSpacing = 0.4.sp, color = fg,
+            )
+            // Only while the commentary is coming off disk, and only then: a spinner that
+            // shows on every chapter turn would be noise.
+            if (busy) {
+                Spacer(Modifier.width(6.dp))
+                CircularProgressIndicator(
+                    strokeWidth = 1.2.dp,
+                    color = fg,
+                    modifier = Modifier.size(9.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TextAction(label: String, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    Text(
+        label,
+        fontFamily = UiFont, fontSize = 11.5.sp, fontWeight = FontWeight.Medium,
+        letterSpacing = 0.4.sp, color = p.inkSoft,
+        modifier = Modifier
+            .clickable(
+                indication = null,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+            ) { onClick() }
+            .padding(vertical = 4.dp, horizontal = 2.dp),
+    )
+}
+
+@Composable
+private fun Chip(label: String, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = Color.Transparent,
+        border = androidx.compose.foundation.BorderStroke(1.dp, p.rule),
+    ) {
+        Text(
+            label, fontFamily = DisplayFont, fontSize = 20.sp, color = p.inkSoft,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.size(38.dp).wrapContentHeight(),
+        )
+    }
+}
+
+@Composable
+private fun PlayerBar(narrator: Narrator, state: ReaderState, bed: Bed, prefs: Prefs) {
+    val p = LocalPalette.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    // Which control is unfolded, if any. Only one at a time: the panel is a drawer, not a form.
+    var open by remember { mutableStateOf<String?>(null) }
+    var expanded by remember { mutableStateOf(false) }
+    // Discover the voices so the row can name one without a reading happening first.
+    LaunchedEffect(Unit) { narrator.loadVoices() }
+
+    Surface(color = p.paper) {
+        Column {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(p.rule))
+
+            AnimatedVisibility(
+                visible = expanded,
+                enter = fadeIn() + androidx.compose.animation.expandVertically(),
+                exit = fadeOut() + androidx.compose.animation.shrinkVertically(),
+            ) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp)) {
+                    Setting(
+                        label = "Voice",
+                        value = if (narrator.modelReady()) narrator.voice else "not downloaded",
+                        detail = Voices.describe(narrator.voice),
+                        on = open == "voice",
+                        onTap = { open = if (open == "voice") null else "voice" },
+                    )
+                    if (open == "voice") {
+                        val known = Voices.ALL.map { it.name }.filter { it in narrator.voices }
+                        val rest = narrator.voices.filter { it !in known }
+                        Choices {
+                            (known + rest).forEach { v ->
+                                Choice(v, Voices.describe(v), narrator.voice == v) {
+                                    narrator.chooseVoice(v); prefs.voice = v; prefs.save()
+                                    open = null
+                                }
+                            }
+                        }
+                    }
+
+                    Setting(
+                        label = "Bed",
+                        value = when (bed.track) {
+                            null -> "None"
+                            Bed.ROTATE -> "Rotating"
+                            else -> Beds.label(bed.track!!)
+                        },
+                        // Under rotation the useful detail is which bed is actually playing,
+                        // not the word "rotating" again.
+                        detail = if (bed.track == Bed.ROTATE) bed.sounding?.let { Beds.label(it) }
+                                 else bed.track?.let { Beds.of(it)?.detail },
+                        on = open == "bed",
+                        onTap = { open = if (open == "bed") null else "bed" },
+                    )
+                    if (open == "bed") {
+                        val have = bed.available()
+                        if (have.isEmpty()) {
+                            // Nothing to pick from yet: say where the music comes from rather
+                            // than showing an empty list.
+                            Text(
+                                "No music downloaded. Marks & settings → Settings → Music.",
+                                fontFamily = UiFont, fontSize = 11.sp, color = p.inkSoft,
+                                modifier = Modifier.padding(start = 2.dp, bottom = 10.dp),
+                            )
+                        } else {
+                            Choices {
+                                Choice("None", null, bed.track == null) {
+                                    bed.stop(); prefs.bed = ""; prefs.save(); open = null
+                                }
+                                // One 57-second loop over an hour's reading is what grates,
+                                // not the loop itself — so offer to move through them all.
+                                if (have.size > 1) {
+                                    Choice(
+                                        "Rotate",
+                                        "move through them all",
+                                        bed.track == Bed.ROTATE,
+                                    ) {
+                                        bed.choose(Bed.ROTATE)
+                                        prefs.bed = bed.track ?: ""; prefs.save()
+                                    }
+                                }
+                                Beds.ALL.filter { it.name in have }.forEach { item ->
+                                    Choice(item.label, item.detail, bed.track == item.name) {
+                                        bed.choose(item.name)
+                                        prefs.bed = bed.track ?: ""; prefs.save()
+                                    }
+                                }
+                            }
+                            if (bed.track != null) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        "Music", fontFamily = UiFont, fontSize = 11.sp,
+                                        color = p.inkSoft, modifier = Modifier.width(52.dp),
+                                    )
+                                    Slider(
+                                        value = prefs.bedLevel,
+                                        onValueChange = { prefs.bedLevel = it; bed.setVolume(it) },
+                                        onValueChangeFinished = { prefs.save() },
+                                        colors = SliderDefaults.colors(
+                                            thumbColor = p.gold, activeTrackColor = p.gold,
+                                            inactiveTrackColor = p.rule,
+                                        ),
+                                        modifier = Modifier.weight(1f).height(26.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Setting(
+                        label = "Pace",
+                        value = "${"%.2f".format(prefs.rate).trimEnd('0').trimEnd('.')}×",
+                        // Phonon's rate is fixed when the audio track is built, so a change
+                        // lands on the next read rather than the sentence being spoken.
+                        detail = if (narrator.speaking) "from the next read" else null,
+                        on = open == "pace",
+                        onTap = { open = if (open == "pace") null else "pace" },
+                    )
+                    if (open == "pace") {
+                        Choices {
+                            listOf(0.9f, 1.0f, 1.15f, 1.3f).forEach { r ->
+                                val name = "${"%.2f".format(r).trimEnd('0').trimEnd('.')}×"
+                                Choice(name, null, kotlin.math.abs(prefs.rate - r) < 0.01f) {
+                                    prefs.rate = r; narrator.rate = r; prefs.save()
+                                    open = null
+                                }
+                            }
+                        }
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(p.rule))
+                }
+            }
+
+            Row(
+                Modifier.fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(horizontal = 18.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    onClick = {
+                        if (narrator.speaking) narrator.stop()
+                        else narrator.speak(state.narrationLines(), narrator.resumeAt)
+                    },
+                    shape = CircleShape,
+                    color = p.gold,
+                    modifier = Modifier.size(50.dp),
+                ) {
+                    Text(
+                        if (narrator.speaking) "❚❚" else "▶",
+                        color = p.paper,
+                        fontSize = if (narrator.speaking) 15.sp else 19.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.wrapContentHeight(),
+                    )
+                }
+                Spacer(Modifier.width(15.dp))
+                // The whole strip opens the panel: a 50dp chevron alone is a small target for
+                // something you reach for one-handed, mid-chapter.
+                Column(
+                    Modifier.weight(1f).clickable {
+                        expanded = !expanded
+                        if (!expanded) open = null
+                    },
+                ) {
+                    Text(
+                        when {
+                            narrator.preparing -> "warming up…"
+                            narrator.speaking && narrator.verseIndex >= 0 ->
+                                "reading verse ${state.verses.getOrNull(narrator.verseIndex)?.id?.verse ?: ""}"
+                            narrator.error != null -> narrator.error!!
+                            narrator.resumeAt > 0 ->
+                                "Continue from verse ${state.verses.getOrNull(narrator.resumeAt)?.id?.verse ?: ""}"
+                            else -> "Read aloud"
+                        },
+                        fontFamily = UiFont, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                        color = if (narrator.error != null) p.gold else p.ink,
+                    )
+                    Text(
+                        buildString {
+                            append(if (narrator.modelReady()) narrator.voice else "voice not downloaded")
+                            // Name the bed that is sounding; under rotation that changes.
+                            (bed.sounding ?: bed.track)?.let {
+                                append(" · ").append(if (it == Bed.ROTATE) "Music" else Beds.label(it))
+                            }
+                        },
+                        fontFamily = UiFont, fontSize = 11.sp, color = p.inkSoft,
+                    )
+                }
+                Text(
+                    if (expanded) "⌄" else "⌃",
+                    fontFamily = UiFont, fontSize = 15.sp, color = p.inkSoft,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.size(38.dp).wrapContentHeight()
+                        .clickable { expanded = !expanded; if (!expanded) open = null },
+                )
+            }
+        }
+    }
+}
+
+/** One line of the player panel: what it is, what it is set to, and a way in. */
+@Composable
+private fun Setting(
+    label: String, value: String, detail: String?, on: Boolean, onTap: () -> Unit,
+) {
+    val p = LocalPalette.current
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onTap).padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, fontFamily = UiFont, fontSize = 11.sp, color = p.inkSoft,
+            modifier = Modifier.width(52.dp))
+        Text(value, fontFamily = UiFont, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            color = p.ink)
+        detail?.let {
+            Spacer(Modifier.width(7.dp))
+            Text(it, fontFamily = UiFont, fontSize = 11.sp, color = p.inkSoft)
+        }
+        Spacer(Modifier.weight(1f))
+        Text(if (on) "⌄" else "›", fontFamily = UiFont, fontSize = 13.sp, color = p.inkSoft)
+    }
+}
+
+/** The list a setting opens into, inset so it reads as belonging to the row above. */
+@Composable
+private fun Choices(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(start = 52.dp, bottom = 6.dp)
+            .heightIn(max = 196.dp).verticalScroll(rememberScrollState()),
+        content = content,
+    )
+}
+
+@Composable
+private fun Choice(name: String, detail: String?, on: Boolean, onTap: () -> Unit) {
+    val p = LocalPalette.current
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onTap).padding(vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(if (on) p.gold else p.rule))
+        Spacer(Modifier.width(10.dp))
+        Text(name, fontFamily = UiFont, fontSize = 13.sp, color = p.ink)
+        detail?.let {
+            Spacer(Modifier.width(7.dp))
+            Text(it, fontFamily = UiFont, fontSize = 11.sp, color = p.inkSoft)
+        }
+    }
+}

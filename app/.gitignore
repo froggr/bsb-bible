@@ -1,0 +1,5 @@
+# Never commit the signing key or its passwords. See KEYSTORE-README.md.
+keystore.properties
+keystore/
+*.jks
+*.keystore
