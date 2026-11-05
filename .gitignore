@@ -16,3 +16,4 @@ data/*.db.gz
 data/src/
 public/data/
 public/app.apk
+vendor/xn-ptts/
