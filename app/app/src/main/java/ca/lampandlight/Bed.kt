@@ -74,7 +74,16 @@ class Bed(private val ctx: Context) {
     private var pump: Job? = null
     private var fade: Job? = null
     private val scope = CoroutineScope(Dispatchers.Main.immediate)
-    /** Decoded loops, kept so switching back to a bed does not decode it again. */
+    /**
+     * Decoded loops, kept so switching back to a bed does not decode it again.
+     *
+     * Every bed, not a few: rotation visits all of them, and a cache of three meant almost
+     * every turn paid for a fresh decode, which is the pause that was heard between beds.
+     *
+     * Only the LOOPS are kept. All eight loops are 40 MB at 24 kHz mono; keeping the run-ins
+     * too would be 61 MB, and after the first play a run-in is never wanted again — rotation
+     * enters at the loop deliberately. Dropping them costs nothing and saves a third.
+     */
     private val cache = HashMap<String, Pair<FloatArray, FloatArray>>()
 
     /** The gain actually applied, before the duck. */
@@ -132,7 +141,7 @@ class Bed(private val ctx: Context) {
     fun setVolume(v: Float) {
         level = v.coerceIn(0f, 1f)
         fade?.cancel(); fade = null
-        gain(if (ducked) target * DUCK else target)
+        gain(if (ducked) target * duckFloor(level) else target)
     }
 
     private fun gain(g: Float) {
@@ -152,28 +161,38 @@ class Bed(private val ctx: Context) {
             val loop = BedAudio.decode(f, if (b > a) a else 0L,
                 if (b > a) b else Long.MAX_VALUE / 2) ?: return@withContext null
             val intro = if (a > 0) BedAudio.decode(f, 0L, a) ?: FloatArray(0) else FloatArray(0)
-            (intro to loop).also { if (cache.size < 3) cache[name] = it }
+            (intro to loop).also { cache[name] = FloatArray(0) to loop }
         }
     }
 
-    /** Play [name]: its run-in once, then its loop for as long as it is wanted. */
-    private fun start(name: String) {
+    /**
+     * Play [name]: its run-in once, then its loop for as long as it is wanted.
+     *
+     * [decoded] skips the decode when the caller has already done it (see [crossTo]).
+     * [fromLoop] skips the run-in, for a bed arriving part-way through a reading.
+     */
+    private fun start(
+        name: String,
+        decoded: Pair<FloatArray, FloatArray>? = null,
+        fromLoop: Boolean = false,
+    ) {
         release()
         sounding = name
         played += name
         playing = true
         pump = scope.launch {
-            val s = samples(name) ?: run {
+            val s = decoded ?: samples(name) ?: run {
                 Log.w(TAG, "bed $name could not be decoded"); track = null; playing = false
                 return@launch
             }
-            val (intro, loop) = s
+            val (rawIntro, loop) = s
+            val intro = if (fromLoop) FloatArray(0) else rawIntro
             if (loop.isEmpty()) { playing = false; return@launch }
             val t = buildTrack()
             live = t
             t.setVolume(0f)
             t.play()
-            fadeTo(if (ducked) target * DUCK else target, FADE_IN)
+            fadeTo(if (ducked) target * duckFloor(level) else target, FADE_IN)
             val began = System.currentTimeMillis()
             withContext(Dispatchers.IO) {
                 // The run-in, once.
@@ -231,22 +250,35 @@ class Bed(private val ctx: Context) {
     }
 
     /**
-     * Move to a different bed under a crossfade.
+     * Move to a different bed.
      *
      * The only place a fade belongs: two unrelated pieces of music, so the join has to be
      * smoothed. A loop join does not — see the class comment.
+     *
+     * The order here is the whole point. Decoding the next bed takes long enough to hear, so
+     * it is decoded FIRST, while the current bed is still playing at full gain; only then does
+     * the outgoing fade start. Fading first and decoding afterwards is what made rotation
+     * stop dead and then begin again — the gain reached zero, and the music resumed whenever
+     * the decode happened to finish.
+     *
+     * The incoming bed also starts at its LOOP, not at its run-in. A run-in is written to be
+     * heard once from silence at the top of a session; arriving at one mid-reading is the
+     * jolt, because it is the one part of the file that does not continue from anything.
      */
     private fun crossTo(name: String) {
         scope.launch {
-            val from = lastGain
+            // Decode before touching the gain, so the handover has something to hand to.
+            val next = samples(name)
+            if (next == null) { Log.w(TAG, "bed $name could not be decoded"); return@launch }
             val steps = (CROSSFADE / STEP).coerceAtLeast(1)
+            val from = lastGain
             for (i in 1..steps) {
                 if (!isActive) return@launch
                 val k = i.toFloat() / steps
                 gain(from * kotlin.math.cos(k * Math.PI.toFloat() / 2))
                 delay(STEP.toLong())
             }
-            start(name)
+            start(name, decoded = next, fromLoop = true)
         }
     }
 
@@ -260,7 +292,7 @@ class Bed(private val ctx: Context) {
         if (ducked == on) return
         ducked = on
         if (!playing) return
-        fadeTo(if (on) target * DUCK else target, if (on) DUCK_DOWN else DUCK_UP)
+        fadeTo(if (on) target * duckFloor(level) else target, if (on) DUCK_DOWN else DUCK_UP)
     }
 
     private fun fadeTo(to: Float, ms: Int) {
@@ -328,8 +360,33 @@ class Bed(private val ctx: Context) {
         private const val TAG = "lamplight"
         /** The bed's loudest, at level 1.0. Music under speech belongs well down. */
         private const val CEILING = 0.34f
-        /** What is left of the bed while a verse is sounding. */
-        private const val DUCK = 0.3f
+        /**
+         * What is left of the bed while a verse is sounding, at the TOP of the slider.
+         *
+         * 0.3 took 10.5 dB off and buried the bed: at a middling setting the music fell to
+         * -26 dBFS under every verse and climbed back between them, which is heard as pumping
+         * rather than as music. 0.6 is 4.4 dB — enough to clear the voice, little enough that
+         * the bed stays present.
+         *
+         * See [duckFloor] for why this is the duck at the top of the slider and not a
+         * constant: the whole reason there is a volume control is that the listener decides
+         * how loud the bed is, and a fixed ratio quietly takes that back at low settings.
+         */
+        private const val DUCK = 0.6f
+
+        /**
+         * The duck, eased off as the slider comes down.
+         *
+         * A constant ratio is wrong at the quiet end. Someone who has already set the bed low
+         * has said what they want; ducking that by a further 4.4 dB leaves nothing, so the
+         * music disappears and returns at every verse — the effect is more distracting than
+         * the music it was protecting the voice from. At the loud end the duck is needed in
+         * full, because that is where the bed genuinely competes.
+         *
+         * So interpolate: full [DUCK] at the top of the slider, no duck at all at the bottom.
+         * The voice is loudest relative to the bed exactly where the bed was quiet anyway.
+         */
+        fun duckFloor(level: Float): Float = DUCK + (1f - DUCK) * (1f - level.coerceIn(0f, 1f))
         private const val FADE_IN = 1_400
         private const val DUCK_DOWN = 450
         private const val DUCK_UP = 1_800
@@ -352,10 +409,19 @@ object Beds {
      * A bed, and where its seamless loop lives inside the file.
      *
      * [loopStartMs] to [loopEndMs] is a region whose end genuinely continues into its start.
-     * It is a WHOLE NUMBER OF BARS, on the track's own beat grid — a loop that measures well
-     * but ends mid-bar still lurches, because the ear is counting. `data/loop_points.py`
-     * finds the grid and picks the bar-exact region with the cleanest join; the bar count is
-     * noted against each entry below.
+     * It is a whole number of BARS in the track's own GLOBAL MUSICAL TIME: one tempo and one
+     * downbeat per track, with every position derived as `downbeat + k * bar` by arithmetic.
+     * A loop that measures well but ends mid-bar still lurches, because the ear is counting.
+     *
+     * Snapping to DETECTED beat times is not good enough and was the 0.35 bug: that list
+     * drifts by tens of ms, so a loop can be an exact number of detected beats and still be
+     * 0.39 of a bar long. Only a computed grid cannot drift.
+     *
+     * `data/loop_points.py` builds the grid and `--verify` measures what matters: splice the
+     * loop three times, track beats over the splice, and report how late the beat crossing
+     * the join arrives. That number is noted against each entry — it is a TIMING measurement,
+     * not a timbre one. Under ~15 ms is inaudible; morning previously measured 116 ms.
+     * Where the existing points already measured tighter they were kept, per bed.
      *
      * The audio before [loopStartMs] is the track's run-in: played once, then never again,
      * which is why the loop must NOT be crossfaded back into it.
@@ -369,14 +435,14 @@ object Beds {
     )
 
     val ALL = listOf(
-        Item("stillness", "Stillness", "sampled chords \u00b7 0:11 loop", loopStartMs = 33901, loopEndMs = 45047),   // 4 bars
-        Item("morning", "Morning", "guitar \u00b7 0:17 loop", loopStartMs = 9961, loopEndMs = 26587),   // 6 bars
-        Item("evening", "Evening", "guitar \u00b7 0:11 loop", loopStartMs = 3640, loopEndMs = 14925),   // 8 bars
-        Item("psalter", "Psalter", "synth pads \u00b7 0:42 loop", loopStartMs = 12823, loopEndMs = 55200),   // 24 bars
-        Item("vigil", "Vigil", "keys \u00b7 1:09 loop", loopStartMs = 62198, loopEndMs = 130767),   // 20 bars
-        Item("upper-room", "Upper Room", "electric piano \u00b7 1:15 loop", loopStartMs = 668, loopEndMs = 75413),   // 24 bars
-        Item("wilderness", "Wilderness", "sparse keys \u00b7 1:32 loop", loopStartMs = 51321, loopEndMs = 143458),   // 56 bars
-        Item("shepherd", "Shepherd", "warm chords \u00b7 1:39 loop", loopStartMs = 50376, loopEndMs = 149687),   // 36 bars
+        Item("stillness", "Stillness", "sampled chords \u00b7 0:11 loop", loopStartMs = 33901, loopEndMs = 45047),   // unchanged, join 0 ms
+        Item("morning", "Morning", "guitar \u00b7 0:11 loop", loopStartMs = 7667, loopEndMs = 18820),   // 4 bars, join 12 ms
+        Item("evening", "Evening", "guitar \u00b7 0:11 loop", loopStartMs = 3599, loopEndMs = 14893),   // 8 bars, join 0 ms
+        Item("psalter", "Psalter", "synth pads \u00b7 0:14 loop", loopStartMs = 36332, loopEndMs = 50456),   // 8 bars, join 12 ms
+        Item("vigil", "Vigil", "keys \u00b7 0:14 loop", loopStartMs = 60957, loopEndMs = 74673),   // 4 bars, join 0 ms
+        Item("upper-room", "Upper Room", "electric piano \u00b7 1:15 loop", loopStartMs = 668, loopEndMs = 75413),   // unchanged, join 0 ms
+        Item("wilderness", "Wilderness", "sparse keys \u00b7 1:32 loop", loopStartMs = 51321, loopEndMs = 143458),   // unchanged, join 23 ms
+        Item("shepherd", "Shepherd", "warm chords \u00b7 1:39 loop", loopStartMs = 50376, loopEndMs = 149687),   // unchanged, join 12 ms
     )
 
     fun of(name: String): Item? = ALL.firstOrNull { it.name == name }

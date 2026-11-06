@@ -289,10 +289,40 @@ class Narrator(private val ctx: Context) {
         text.split(" ").joinToString(" ") { w ->
             // Ignore a trailing possessive, so LORD's folds the same as LORD.
             val letters = w.removeSuffix("'s").removeSuffix("'S").filter { it.isLetter() }
-            if (letters.length >= 2 && letters.all { it.isUpperCase() })
-                w.lowercase().replaceFirstChar { it.uppercase() }
-            else w
+            val folded =
+                if (letters.length >= 2 && letters.all { it.isUpperCase() })
+                    w.lowercase().replaceFirstChar { it.uppercase() }
+                else w
+            respell(folded)
         }.replace("\u2014", ",").replace("\u2013", ",").replace(" ,", ",")
+
+    /**
+     * Say a name the model cannot read, by spelling it the way it sounds.
+     *
+     * The same 4000-piece vocabulary that spells out LORD also has no piece for a lot of
+     * biblical names, and what it does instead is worse than spelling: it takes the longest
+     * pieces it has and runs them together. `Pyrrhus` becomes P|y|r|r|hu|s and `Binnui`
+     * becomes B|in|n|u|i — five and four single-character pieces, read as fragments.
+     *
+     * Each entry below was checked against the real tokenizer (a Viterbi pass over the
+     * Unigram lattice in `tokenizer.json`, the same segmentation ptts performs) and is here
+     * only because the respelling genuinely segments better: Pyrrhus 5 single-char pieces
+     * down to 1, Binnui 4 to 1, Cyprus 4 to 2.
+     *
+     * Deliberately NOT here: `Psalm`, `Egypt`, `Hebrews`, `Pharaoh`, `Woe`. They fragment too
+     * — `Psalm` is the single most-heard fragmenting word in the Bible — but they are ordinary
+     * English the model has clearly learned, and it says them correctly. Fragment count is a
+     * proxy for trouble, not proof of it, so it earns a word a listen, not an entry.
+     *
+     * Only the spoken string changes; the page is untouched. Add to this list by ear: say the
+     * word, and if the model gets it wrong, find a spelling it reads correctly.
+     */
+    private fun respell(word: String): String {
+        val bare = word.trimStart { !it.isLetter() }.trimEnd { !it.isLetter() }
+        if (bare.isEmpty()) return word
+        val fix = RESPELL[bare] ?: RESPELL[bare.lowercase()] ?: return word
+        return word.replaceFirst(bare, fix)
+    }
 
     /**
      * Split a verse into the pieces that will be spoken separately.
@@ -450,6 +480,26 @@ class Narrator(private val ctx: Context) {
     }
 
     companion object {
+        /**
+         * Names the model misreads, and a spelling it reads correctly.
+         *
+         * Verified against the shipped tokenizer, not guessed: each right-hand side segments
+         * into fewer single-character pieces than the name it replaces. See [respell].
+         */
+        private val RESPELL = mapOf(
+            // Proper nouns whose real spelling the vocabulary cannot piece together.
+            "Pyrrhus" to "Pirus",
+            "Binnui" to "Binooee",
+            "Cyprus" to "Siprus",
+            "Shammua" to "Shammooah",
+            "Phinehas" to "Finehas",
+            "Issachar" to "Izzakar",
+            "Euphrates" to "Yoofrates",
+            "Iscariot" to "Iscarryot",
+            // "Acts" is read A-c-t-s, and it is in every cross-reference. "Acks" halves
+            // the fragments; "Ax" scores the same but would be said "axe".
+            "Acts" to "Acks",
+        )
         /**
          * Tidy a commentary paragraph for the ear.
          *
