@@ -23,11 +23,13 @@ object Voices {
     /**
      * One voice.
      *
-     * [tempo] is how much faster than Phonon's own output the voice is played, pitch kept:
-     * the characters were designed to speak slowly and with weight, and at their natural
-     * pace a chapter drags. Measured on the same 47 words: Vyrmathrax took 19.3 s where
-     * Spencer took 15.8, so 1.25 brings him level — which is also the figure Joe settled on
-     * by ear for Scripture Radio. The reader's own Pace multiplies this.
+     * [tempo] is how much faster than Phonon's own output the voice is played, pitch kept.
+     * It is 1 for every voice: the characters were designed to speak slowly and the first
+     * cut gave each a tempo derived from its duration on the same text (Methuselah 1.25,
+     * the radio's figure), and Joe found him "way too much" sped up — the app has a Pace
+     * control, and that is where speed belongs, chosen by the listener, not baked into the
+     * voice where it multiplies with Pace. Kept as a field so a voice can be corrected if
+     * one ever needs it.
      *
      * [warmth] is the sampling temperature, how much the voice is allowed to move. The
      * runtime's default of 0.3 is steady and a little flat; 0.6 gives a reading voice its
@@ -61,29 +63,29 @@ object Voices {
 
         // ---- characters, renamed. The repository's name is in the comment.
         Voice("Methuselah", "xO8xQo3BrB8FuI6J", true, "ancient, very deep, unhurried",     // Vyrmathrax the Ancient
-            tempo = 1.25f, warmth = 0.9f, character = true),
+            warmth = 0.9f, character = true),
         Voice("Aldric", "gSgG5Tor0GPEnqzC", true, "a master's measured authority",         // Master Aldric
-            tempo = 1.1f, character = true),
+            character = true),
         Voice("Silas", "xPDpsV3F592srkjA", true, "a sea captain, weathered and sure",       // Captain Silas Blackwater
-            tempo = 1.05f, character = true),
+            character = true),
         Voice("Bramwell", "y2eiKxtQo2B67deU", true, "a knight, courtly and warm",           // Sir Bramwell
             character = true),
         Voice("Mortlake", "lX3LavMNdlIbgEHH", true, "old, dry, close to the ear",           // Old Mortlake
             character = true),
         Voice("Og", "cYtsRSxV5q9IMehn", true, "a giant, slow and heavy",                    // Grub the Ogre
-            tempo = 1.1f, character = true),
+            character = true),
         Voice("Abner", "dGyGDKo2osj7h3s7", true, "dark and resonant",                      // Azgorath
-            tempo = 1.15f, character = true),
+            character = true),
         Voice("Hollis", "GXaSqMEmOg12OIYb", true, "hushed, strange, from the shadows",      // The Thing Under the Stairs
-            tempo = 1.1f, character = true),
+            character = true),
         Voice("Fennick", "cXoIXJ2llS8S0WOW", true, "young, bright, quick",                  // Fennick the Young Elf
             character = true),
         Voice("Morwenna", "nOykTmcH9ydsGGIc", false, "low, slow, from the deep",            // Morwenna of the Deep
-            tempo = 1.1f, character = true),
+            character = true),
         Voice("Esther", "NIWoEurJHMJjyUTe", false, "a queen, cool and clear",               // The Snow Queen
             character = true),
         Voice("Marian", "QXNr0SvkukLB4wPq", false, "a godmother, warm and twinkling",       // Fairy Godmother
-            tempo = 1.15f, character = true),
+            character = true),
     )
 
     fun byName(name: String): Voice? = ALL.firstOrNull { it.name.equals(name, true) }
