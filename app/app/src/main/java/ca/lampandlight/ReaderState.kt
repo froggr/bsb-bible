@@ -347,7 +347,7 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
     private val history = ArrayDeque<Triple<Int, Int, Int>>()
 
     /**
-     * The verse to scroll to once the page has drawn, consumed by the reader.
+     * The verse NUMBER to scroll to once the page has drawn, consumed by the reader.
      *
      * Starts at the verse that was on screen last time, so a launch lands where reading
      * stopped rather than at the top of the chapter.
@@ -394,7 +394,9 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
     }
 
     /**
-     * The verse at the top of the screen, so going back returns to the place, not the page.
+     * The verse NUMBER at the top of the screen, so going back returns to the place, not
+     * the page. A number, like [pending], because it becomes one: through the history and
+     * the saved place it comes back as the verse to land on.
      *
      * Also what gets written down: coming back to the chapter but the top of it would still
      * lose your place in a long one.
@@ -523,18 +525,30 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
         go {
             val c = bible.commentaryFor(want.first, want.second)
             val x = bible.crossRefsFor(want.first, want.second)
-            // The reader may have turned the page while this was reading from disk.
+            // The reader may have turned the page while this was reading from disk. A
+            // stale fetch must not clear the flag either: the fetch for the new page is
+            // still running, and a landing that waits on the flag would stop waiting.
             if (want == (book to chapter)) {
                 commentary = c; refs = x; studyFor = want
                 rebuild()
+                studyLoading = false
             }
-            studyLoading = false
         }
     }
 
-    /** Which row holds verse [index], so the list can scroll to it. */
+    /** Which row holds the verse at position [index] in the chapter (0-based, the narrator's unit). */
     fun rowOfVerse(index: Int): Int =
         rows.indexOfFirst { it is Row.Verse && it.index == index }
+
+    /**
+     * Which row holds verse NUMBER [n] — "16" in John 3:16.
+     *
+     * Not the same as [rowOfVerse]: a number is one more than an index, and more than that
+     * where the BSB omits a verse. Jumps, links and the saved place all speak in numbers;
+     * landing them through the index put every one of them a verse too far down the page.
+     */
+    fun rowOfVerseNumber(n: Int): Int =
+        rows.indexOfFirst { it is Row.Verse && it.verse.id.verse == n }
 
     /**
      * What the narrator reads, in order.

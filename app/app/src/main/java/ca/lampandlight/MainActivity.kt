@@ -1,6 +1,7 @@
 package ca.lampandlight
 
 import android.os.Build
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -46,6 +47,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Opened at a passage from outside: held until the Bible is open, then consumed.
+        arriving = intent
         setContent {
             var ready by remember { mutableStateOf<Bible?>(null) }
             var failed by remember { mutableStateOf<String?>(null) }
@@ -95,6 +98,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * A link while the app is already running. The activity is singleTask, so Android
+     * hands the intent here instead of starting a second copy.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        arriving = intent
+    }
+
     override fun onStart() {
         super.onStart()
         bed?.resume()             // only does anything if the bed was actually paused
@@ -109,6 +121,9 @@ class MainActivity : ComponentActivity() {
         /** Bumped on every onStart, so composition can watch for the app being resumed. */
         var visits by mutableIntStateOf(0)
             private set
+
+        /** An intent that may name a passage, waiting for the reader to take it. */
+        var arriving by mutableStateOf<Intent?>(null)
     }
 
     override fun onStop() {
@@ -160,6 +175,16 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
     LaunchedEffect(Unit) {
         bed.restore(prefs.bed.ifBlank { null }, prefs.bedLevel)
         narrator.rate = prefs.rate
+    }
+    // A passage asked for from outside — a widget, a shortcut, a link — once the reader
+    // is ready to show it. See [Deeplink] for the forms accepted.
+    LaunchedEffect(MainActivity.arriving) {
+        val intent = MainActivity.arriving ?: return@LaunchedEffect
+        MainActivity.arriving = null
+        val v = Deeplink.verseOf(intent, bible.books) ?: return@LaunchedEffect
+        narrator.reset()
+        screen = "read"
+        state.go(v.book, v.chapter, at = v.verse)
     }
     // A chapter read to its end runs on into the next, unless asked not to. The next
     // chapter's study material comes off disk, so in study mode the voice waits for it

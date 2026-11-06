@@ -161,6 +161,37 @@ Traps worth knowing, all found on device:
   fed `contentPadding`, which then never shrank when the bar did, and every verse under the
   finger read a couple too low.
 
+## Opening the app at a passage
+
+Anything outside the app — a verse-of-the-day widget, a launcher shortcut, Tasker, another
+app — can open it on a verse:
+
+```
+bsb://open?ref=John+3:16
+```
+
+`ref` is whatever the search box accepts: `jn3:16`, `1 cor 13`, `ps 23:4`, `rev`. The same
+reference can be sent as a string extra named `ref` on an explicit intent to
+`ca.lampandlight/.MainActivity`. From a shell:
+
+```sh
+adb shell am start -a android.intent.action.VIEW -d "bsb://open?ref=John%203:16"
+adb shell am start -n ca.lampandlight/.MainActivity --es ref "Psalm 23:4"
+```
+
+The app also registers for the links a verse-of-the-day widget usually carries, so such a
+widget needs no change — Android offers BSB Bible next to the browser and remembers the
+choice:
+
+| | |
+|---|---|
+| `https://www.biblegateway.com/passage/?search=John+3:16` | the `search` query |
+| `https://www.bible.com/bible/59/JHN.3.16` | YouVersion's three-letter book codes |
+| `https://biblehub.com/john/3-16.htm` | book, chapter-verse |
+
+If the app is already open it turns to the passage rather than starting a second copy
+(`launchMode="singleTask"`). Parsing lives in `Deeplink.kt`.
+
 ## Shipping a build
 
 Releases go to GitHub, which costs nothing and has no bandwidth limit. The app's default host

@@ -207,9 +207,23 @@ fun commentaryName(source: String): String = when (source) {
  * and whether it is worth reading now.
  */
 @Composable
-fun CommentRow(source: String, body: String, onSpeak: (() -> Unit)? = null) {
+fun CommentRow(
+    source: String,
+    body: String,
+    /** The verse the paragraph hangs from: what "this book" and "v. 7" mean in it. */
+    verse: VerseId,
+    books: List<Book>,
+    /** Follow a scripture cited in the text. */
+    onGo: (VerseId) -> Unit,
+    onSpeak: (() -> Unit)? = null,
+) {
     val p = LocalPalette.current
     var open by remember(body) { mutableStateOf(false) }
+    // The citations are links, in the cross-reference colour, so a commentator's "see
+    // Lu 13:6" is one tap away instead of a search. Built once per paragraph.
+    val text = remember(body, verse) {
+        Citations.linked(commentaryText(body), verse, books, p.indigo, onGo)
+    }
     Row(
         Modifier
             .padding(start = INDENT, bottom = 18.dp)
@@ -242,7 +256,7 @@ fun CommentRow(source: String, body: String, onSpeak: (() -> Unit)? = null) {
             }
             Spacer(Modifier.height(5.dp))
             androidx.compose.material3.Text(
-                commentaryText(body),
+                text,
                 fontFamily = ReadingFont,
                 fontSize = (14 * LocalTextScale.current).sp,
                 lineHeight = (23.5 * LocalTextScale.current).sp,

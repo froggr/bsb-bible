@@ -125,17 +125,38 @@ fun Reader(
     // chapter rather than to its first verse.
     LaunchedEffect(list) {
         snapshotFlow { list.firstVisibleItemIndex }.collect { i ->
-            (state.rows.getOrNull(i) as? Row.Verse)?.let { state.topVerse = it.index }
+            (state.rows.getOrNull(i) as? Row.Verse)?.let { state.topVerse = it.verse.id.verse }
         }
     }
 
     // Land on the verse a jump asked for, once the new chapter has been laid out.
-    LaunchedEffect(state.rows, state.pending) {
+    //
+    // Keyed on the request alone, and landed again every time the chapter is re-laid out
+    // in the two seconds after it. The rows change under a fresh chapter more than once —
+    // marks, then the study layer off disk — and a scroll asked for by row index before the
+    // first layout was being applied to whichever list existed by then: a cold start at
+    // Psalm 119:105 landed on verse 57, which is where row 118 of the plain layout falls
+    // once the commentary is interleaved. Landing by verse number on each relayout is
+    // right whatever the order the layers arrive in.
+    LaunchedEffect(state.pending) {
         val want = state.pending
-        if (want <= 0 || state.rows.isEmpty()) return@LaunchedEffect
-        val target = state.rowOfVerse(want)
+        if (want <= 0) return@LaunchedEffect
         state.consumePending()
-        if (target >= 0) list.scrollToItem(target, -120)
+        var landedOn: List<Row>? = null
+        var spent = 0
+        while (spent < 2000) {
+            val rows = state.rows
+            if (rows !== landedOn) {
+                landedOn = rows
+                val target = state.rowOfVerseNumber(want)
+                if (target >= 0) list.scrollToItem(target, -120)
+            }
+            // Settled: not in study mode, so nothing more is coming once a few frames have
+            // passed. In study mode the window stays open: relayouts are cheap to follow
+            // and the layer's arrival time is not worth second-guessing.
+            if (!state.study && spent >= 400) break
+            kotlinx.coroutines.delay(100); spent += 100
+        }
     }
 
     // Follow the narration, but only when the verse has actually left the comfortable part
@@ -249,7 +270,13 @@ fun Reader(
                             "verses ${row.start.verse}\u2013${row.verse.verse}" else null,
                     ) { onOpenNote(row.start, row.verse) }
                     is Row.Footnote -> FootnoteRow(row.text)
-                    is Row.Comment -> CommentRow(row.source, row.body)
+                    is Row.Comment -> CommentRow(
+                        row.source, row.body, row.verse, bible.books,
+                        onGo = { target ->
+                            narrator.stop()
+                            state.go(target.book, target.chapter, at = target.verse)
+                        },
+                    )
                     is Row.Refs -> RefsRow(
                         row.refs.map { r ->
                             val lbl = bible.reference(r.dst).let { base ->
