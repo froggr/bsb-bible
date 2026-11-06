@@ -21,6 +21,14 @@ certificate with them. Instead:
 
 **`timeout(1)` does not exist** on this machine. Use the Bash tool's own timeout.
 
+## Source on GitHub
+
+Since 0.38 the source lives on `origin/main` at `https://github.com/froggr/bsb-bible` (before
+that the repo held only a README and the releases, and this clone had no remote). Push over
+HTTPS with gh's credential helper — `gh auth setup-git` once, then `git push` — because a bare
+`git push` asks for a username and SSH has failed with `commit_refs_rules` before. The README's
+opening is Joe's own words about how the app was made; keep it as the front of the file.
+
 ## Releasing
 
 The full procedure is in `README.md` under *Shipping a build* — read it, it records real
