@@ -98,18 +98,120 @@ def grid(name):
     return dict(beat=beat, bar=bar, bpm=bpm, downbeat=pick % bar, dur=len(y) / sr)
 
 
+BANDS = [(20, 250, "bass"), (250, 2000, "mid"), (2000, 11000, "high")]
+
+
+def _band_db(pre, post, lo, hi):
+    """Level change in one band across the join, in dB."""
+    def e(seg):
+        S = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
+        f = np.fft.rfftfreq(len(seg), 1 / SR)
+        m = (f >= lo) & (f < hi)
+        return float(np.sqrt((S[m] ** 2).mean())) if m.any() else 0.0
+    return 20 * np.log10(max(e(post), 1e-9) / max(e(pre), 1e-9))
+
+
 def seam(x, a_s, b_s, win=7200):
-    """Spectral distance across the join — a TIE-BREAK only, never a reason to leave the grid."""
+    """How ABRUPT the join is, in the terms the ear uses. Tie-break among bar-exact loops.
+
+    A single averaged spectral distance was blind three times over, and each blind spot
+    shipped. It ignores LEVEL, so a loud bar wrapping into a soft one scored best of all
+    candidates on morning. It averages across FREQUENCY, so an 8-bar candidate whose bass
+    had dropped out entirely — -33.7 dB across the join — scored fine on the strength of
+    matching mids and highs. And it says nothing about TRANSIENTS.
+
+    So the parts are measured separately and the worst one is not allowed to hide:
+
+      level   RMS either side, in dB.
+      bands   bass / mid / high separately, so no band can be averaged away.
+      timbre  the old spectral distance, which is still worth something.
+
+    Returns a single cost for ranking, but `report()` prints the parts — read those when a
+    bed sounds wrong, because the summary is exactly what kept failing.
+    """
     A, B = int(a_s * SR), int(b_s * SR)
     if B > len(x) or A + win > len(x) or B - win < 0 or B <= A:
         return None
     pre, post = x[B - win:B], x[A:A + win]
     P = np.abs(np.fft.rfft(pre * np.hanning(win)))
     Q = np.abs(np.fft.rfft(post * np.hanning(win)))
-    P, Q = P / (P.sum() + 1e-9), Q / (Q.sum() + 1e-9)
-    spec = float(np.abs(P - Q).sum())
-    amp = float(abs(np.sqrt((pre[-720:] ** 2).mean()) - np.sqrt((post[:720] ** 2).mean())))
-    return spec + 0.5 * amp
+    Pn, Qn = P / (P.sum() + 1e-9), Q / (Q.sum() + 1e-9)
+    timbre = float(np.abs(Pn - Qn).sum())
+    level = abs(20 * np.log10(
+        max(float(np.sqrt((post ** 2).mean())), 1e-9) /
+        max(float(np.sqrt((pre ** 2).mean())), 1e-9)))
+    worst_band = max(abs(_band_db(pre, post, lo, hi)) for lo, hi, _ in BANDS)
+    # Level and the worst band dominate: those are the faults that were heard.
+    return timbre + 0.25 * level + 0.08 * worst_band
+
+
+def onset_ratio(x, a_s, b_s, bar_s):
+    """Does the join disturb the onset flow more than an ordinary bar line does?
+
+    This is the drum/transient question. Splice the loop three times, take the onset
+    strength envelope, and compare the disturbance AT the seam with the disturbance at the
+    track's own interior bar lines, where nothing is spliced. 1.0 means the seam is
+    indistinguishable from a bar line; morning's chosen loop measures 0.98, and the
+    candidates that sounded abrupt measure 1.33 to 2.27.
+    """
+    import librosa
+    A, B = int(a_s * SR), int(b_s * SR)
+    loop = x[A:B]
+    if len(loop) < SR:
+        return None
+    L = len(loop) / SR
+    ys = librosa.resample(np.concatenate([loop, loop, loop]),
+                          orig_sr=SR, target_sr=22050)
+    env = librosa.onset.onset_strength(y=ys, sr=22050)
+    fps = 22050 / 512
+
+    def jump(t):
+        i, k = int(t * fps), max(2, int(0.08 * fps))
+        if i - k < 0 or i + k >= len(env):
+            return None
+        return abs(float(env[i:i + k].mean()) - float(env[i - k:i].mean()))
+
+    seams = [j for j in (jump(L), jump(2 * L)) if j is not None]
+    base, t = [], bar_s
+    while t < 3 * L - bar_s:
+        if abs(t - L) > 0.3 and abs(t - 2 * L) > 0.3:
+            j = jump(t)
+            if j is not None:
+                base.append(j)
+        t += bar_s
+    if not seams or not base:
+        return None
+    med = float(np.median(base))
+    return float(np.mean(seams)) / med if med > 0 else None
+
+
+def report(x, a_s, b_s, bar_s):
+    """The parts, for reading when a bed sounds wrong despite a good summary cost.
+
+    Measured over TWO windows, because they answer different questions and reading only one
+    is misleading. At 300 ms the figures describe the instant of the splice, where a note
+    decaying into the downbeat shows up as a large bass dip that is ordinary music rather
+    than a fault. At 1.5 s they describe the phrase either side, which is the loud-into-soft
+    abruptness a listener actually reports.
+
+    Morning's chosen loop reads -2.5 dB at 300 ms and +1.3 dB at 1.5 s; the loop it replaced
+    reads -8.2 dB and -4.3 dB. The RANKING is the same at every window length — only the
+    absolute numbers move — so compare candidates, and do not read one window as a verdict.
+    """
+    out = {}
+    A = int(a_s * SR)
+    B = int(b_s * SR)
+    for lab, win in (("short", int(0.3 * SR)), ("phrase", int(1.5 * SR))):
+        pre, post = x[max(0, B - win):B], x[A:A + win]
+        if len(pre) < 256 or len(post) < 256:
+            continue
+        out[lab] = dict(
+            level=20 * np.log10(max(float(np.sqrt((post ** 2).mean())), 1e-9) /
+                                max(float(np.sqrt((pre ** 2).mean())), 1e-9)),
+            bands={l: _band_db(pre, post, lo, hi) for lo, hi, l in BANDS},
+        )
+    out["onset"] = onset_ratio(x, a_s, b_s, bar_s)
+    return out
 
 
 def join_error_ms(name, a_ms, b_ms):
@@ -178,13 +280,26 @@ def main():
               f"{a:9.3f}{b:9.3f}{c:7.3f}")
 
     if args.verify:
-        print(f"\n{'bed':12}{'which':9}{'bars':>8}{'join err ms':>12}")
+        print(f"\n{'bed':12}{'which':9}{'join ms':>8}{'dLevel':>8}"
+              f"{'bass':>7}{'mid':>7}{'high':>7}{'onsetR':>8}")
         for n, v in chosen.items():
+            g = grid(n)
+            x = pcm(n)
             for lab, (a, b) in (("shipped", SHIPPED[n]),
                                 ("new", (v["start"], v["end"]))):
                 e = join_error_ms(n, a, b)
-                print(f"{n:12}{lab:9}{v['bars'] if lab=='new' else '':>8}"
-                      f"{e if e is not None else '-':>12}")
+                r = report(x, a / 1000, b / 1000, g["bar"])
+                ph = r.get("phrase", {})
+                bd = ph.get("bands", {})
+                o = r["onset"]
+                print(f"{n:12}{lab:9}"
+                      f"{(f'{e:.1f}' if e is not None else '-'):>8}"
+                      f"{ph.get('level', 0):+8.2f}{bd.get('bass', 0):+7.1f}"
+                      f"{bd.get('mid', 0):+7.1f}{bd.get('high', 0):+7.1f}"
+                      f"{(f'{o:.2f}' if o else '-'):>8}")
+        print("\njoin ms: beat crossing the seam, <15 inaudible. dLevel/bands: dB across")
+        print("the join over the 1.5 s PHRASE window. onsetR: seam vs the track's own bar")
+        print("lines, 1.0 = indistinguishable. See report() for the 300 ms window too.")
 
     out = "/private/tmp/claude-501/-Users-frog-projects/5b35e6fa-36be-485b-b9d7-f4f5889a0eef/scratchpad/loops.json"
     json.dump(chosen, open(out, "w"), indent=1)
