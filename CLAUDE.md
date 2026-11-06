@@ -40,8 +40,28 @@ Two things that procedure assumes you know:
 **`data/beds/` is the real bed set, `public/beds/` is a copy.** They drifted apart before
 0.34 — `public/` still held pre-vocal-removal files, twice the length of the shipped ones,
 which is how the loop points came to be measured against the wrong audio. `data/beds/` matches
-what is on the release. `data/beds/_withvocals/` holds the originals of the three that were
-re-rendered to strip vocals; do not ship those.
+what is on the release. `data/beds/_v1/` holds the beds 0.35 replaced and `_withvocals/` the
+pre-vocal-strip originals; neither ships, both are gitignored.
+
+**The beds come from `~/Music/Scripture Radio`** (Lo-Fi, Piano, Prayer Room — 78 tracks of
+2-6 minutes, written as beds). Not from `~/projects/yue2/outputs`: that holds song generations,
+and its only instrumentals are Tron-pastiche and french house, wrong for reading under.
+
+**No lyrics is a measured claim, not an assumption.** Every candidate goes through
+`demucs --two-stems=vocals` on a 40 s slice and must show its vocal stem at least 40 dB below
+the accompaniment. This matters: 23 of the 78 did NOT measure clean and two separated with the
+vocal stem LOUDER than the music. They may be sustained pads misread as held voices — two
+attempts to distinguish them automatically both failed, ranking the library's cleanest track as
+its most vocal-like — so anything that does not measure clean is simply excluded.
+
+**serve.py stages the DEBUG apk.** For a release, copy
+`app/app/build/outputs/apk/release/app-release.apk` yourself; `prepare()` will otherwise leave
+a stale APK in `public/` and the manifest will claim the wrong version.
+
+**A release must carry the data layers even when they have not changed.** The app fetches
+everything from `/latest/download/`, so re-upload `data-bible-study.db.gz` and
+`data-bible-commentary.db.gz` (download them from the previous tag, verify their SHA-256
+against the manifest first) or a fresh install finds no study or commentary layer.
 
 **A bed's loop points belong to one exact file.** Re-render the audio and the points are
 scrap. Never crossfade a loop join.
@@ -68,6 +88,27 @@ join arrives. Under ~15 ms is inaudible, ~30 ms is acceptable, 100 ms is the aud
 Morning measured **116 ms** when it was reported as fixed. Also: **do not let a re-fit regress
 a bed that already measures well** — take the better of old and new *per bed*; a global re-fit
 moved `stillness` from 0 ms to 23 ms.
+
+**Timing is necessary but not sufficient — measure LEVEL and BANDS too.** A loop can be
+bar-exact with a perfect seam and still lurch because it ends loud and restarts soft. Morning
+shipped at -4.28 dB across the join and the spectral metric ranked it BEST of all candidates,
+because timbre matched and level is invisible to it. One averaged number also hides a single
+band: an 8-bar candidate read -2.67 dB overall and **-33.7 dB in the bass alone**. `report()`
+returns level and per-band change over two windows — 300 ms for the splice instant, 1.5 s for
+the phrase either side. Read both; a note decaying into the downbeat looks like a huge bass dip
+at 300 ms and is ordinary music.
+
+**`onset_ratio()` is the transient check, and BELOW 1.0 IS GOOD.** It divides the seam's
+disturbance by an ordinary bar line's, so 0.67 means the join is calmer than the music's own
+bars. Only above ~1.3 does a join stand out. A gate rejecting low values rejects the best
+loops — mine did, and called a good bed a failure at 0.67. Treat it as a soft ranking signal,
+not a pass/fail: it moves by a few tenths with loop position.
+
+**Encode first, then derive, then verify on the same bytes.** A loop point belongs to one exact
+file, and three separate failures in 0.35 were all this one mistake: choosing on the source mp3
+then shipping a re-encoded trim; cutting a file flush to its loop so the finder had nothing left
+to search (zero candidates); and carrying a measurement from a whole-file encode onto a re-cut
+file, which read as -9.5 dB and onsetR 84 on good audio. **Never translate points across a cut.**
 
 **Ducking is proportional to the volume slider** (`Bed.duckFloor`). A fixed ratio is wrong at
 the quiet end: someone who already set the bed low has said what they want, and ducking that
