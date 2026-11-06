@@ -1,0 +1,55 @@
+{
+ "generated": 1793971088,
+ "layers": {
+  "bible-study.db": {
+   "url": "/data/bible-study.db.gz",
+   "bytes": 19831361,
+   "sha256": "9526544ca57f5c7ae7af78d9599b4c2ffc09e82da6ce601cb9a052ea4e0fc21d"
+  },
+  "bible-commentary.db": {
+   "url": "/data/bible-commentary.db.gz",
+   "bytes": 12927414,
+   "sha256": "34ff81b0ce29c4a5af63449de75bfcfe221f0811383b6921317637d7d99cda4f"
+  }
+ },
+ "app": {
+  "url": "/app.apk",
+  "bytes": 49418266,
+  "version": "0.31",
+  "sha256": "1ceb37491fdab41c7ca5918d19008aed0d4aee33b3bb910375c0eb11ff6ee70a"
+ },
+ "beds": {
+  "evening": {
+   "url": "/beds/evening.opus",
+   "bytes": 1193321
+  },
+  "morning": {
+   "url": "/beds/morning.opus",
+   "bytes": 912181
+  },
+  "psalter": {
+   "url": "/beds/psalter.opus",
+   "bytes": 970268
+  },
+  "shepherd": {
+   "url": "/beds/shepherd.opus",
+   "bytes": 887155
+  },
+  "stillness": {
+   "url": "/beds/stillness.opus",
+   "bytes": 1047741
+  },
+  "upper-room": {
+   "url": "/beds/upper-room.opus",
+   "bytes": 861936
+  },
+  "vigil": {
+   "url": "/beds/vigil.opus",
+   "bytes": 1073803
+  },
+  "wilderness": {
+   "url": "/beds/wilderness.opus",
+   "bytes": 1234100
+  }
+ }
+}

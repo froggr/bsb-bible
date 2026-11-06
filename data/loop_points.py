@@ -171,11 +171,28 @@ def onset_ratio(x, a_s, b_s, bar_s):
             return None
         return abs(float(env[i:i + k].mean()) - float(env[i - k:i].mean()))
 
-    seams = [j for j in (jump(L), jump(2 * L)) if j is not None]
+    # Probe over neighbouring FRAMES, not neighbouring milliseconds.
+    #
+    # A single probe is hypersensitive: on shepherd, moving the loop by one millisecond
+    # swung the ratio from 1.82 to 1.14 on byte-identical audio. The cause is `int(t * fps)`
+    # — the envelope has one frame per 23 ms, so a sub-frame change in the seam position
+    # flips which frame the window starts on, and that frame may contain a transient. A
+    # first attempt at smoothing offset by +-4 ms, which is INSIDE one frame and therefore
+    # changed nothing at all; the readings stayed identical and looked like a different bug.
+    #
+    # Taking the median over a few frames each way makes the figure a property of the join
+    # rather than of where rounding happened to fall.
+    def jump_avg(t):
+        step = 1.0 / fps
+        vals = [jump(t + k * step) for k in (-2, -1, 0, 1, 2)]
+        vals = [q for q in vals if q is not None]
+        return float(np.median(vals)) if vals else None
+
+    seams = [j for j in (jump_avg(L), jump_avg(2 * L)) if j is not None]
     base, t = [], bar_s
     while t < 3 * L - bar_s:
         if abs(t - L) > 0.3 and abs(t - 2 * L) > 0.3:
-            j = jump(t)
+            j = jump_avg(t)
             if j is not None:
                 base.append(j)
         t += bar_s

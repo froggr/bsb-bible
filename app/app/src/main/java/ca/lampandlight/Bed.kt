@@ -435,14 +435,14 @@ object Beds {
     )
 
     val ALL = listOf(
-        Item("stillness", "Stillness", "sampled chords \u00b7 0:22 loop", loopStartMs = 30053, loopEndMs = 52366),   // 8 bars, +0.1 dB, onsetR 1.06
-        Item("morning", "Morning", "guitar \u00b7 0:11 loop", loopStartMs = 13243, loopEndMs = 24396),   // 4 bars, +1.3 dB, onsetR 0.98
-        Item("evening", "Evening", "guitar \u00b7 0:34 loop", loopStartMs = 29011, loopEndMs = 62894),   // 24 bars, +0.0 dB, onsetR 0.95
-        Item("psalter", "Psalter", "synth pads \u00b7 0:21 loop", loopStartMs = 27500, loopEndMs = 48690),   // 12 bars, +0.3 dB, onsetR 1.05
-        Item("vigil", "Vigil", "keys \u00b7 0:55 loop", loopStartMs = 47241, loopEndMs = 102104),   // 16 bars, +0.2 dB, onsetR 0.99
-        Item("upper-room", "Upper Room", "electric piano \u00b7 0:37 loop", loopStartMs = 52237, loopEndMs = 89595),   // 12 bars, +0.1 dB, onsetR 1.07
-        Item("wilderness", "Wilderness", "sparse keys \u00b7 0:53 loop", loopStartMs = 43742, loopEndMs = 96450),   // 32 bars, +0.1 dB, onsetR 0.97
-        Item("shepherd", "Shepherd", "warm chords \u00b7 1:06 loop", loopStartMs = 79660, loopEndMs = 145868),   // 24 bars, +0.3 dB, onsetR 1.00
+        Item("stillness", "Stillness", "late-night keys \u00b7 0:55 loop", loopStartMs = 16006, loopEndMs = 70854),   // 16 bars @ 70bpm, +0.21 dB, join 0 ms
+        Item("morning", "Morning", "acoustic guitar \u00b7 0:41 loop", loopStartMs = 10853, loopEndMs = 51993),   // 24 bars @ 140bpm, -0.12 dB, join 23 ms
+        Item("evening", "Evening", "guitar swells \u00b7 1:06 loop", loopStartMs = 4001, loopEndMs = 70190),   // 48 bars @ 174bpm, -0.16 dB, join 12 ms
+        Item("psalter", "Psalter", "rainy piano \u00b7 0:40 loop", loopStartMs = 17185, loopEndMs = 56716),   // 24 bars @ 146bpm, -0.00 dB, join 12 ms
+        Item("vigil", "Vigil", "solo piano \u00b7 1:00 loop", loopStartMs = 4005, loopEndMs = 64004),   // 16 bars @ 64bpm, +0.08 dB, join 0 ms
+        Item("upper-room", "Upper Room", "mellow keys \u00b7 0:37 loop", loopStartMs = 5584, loopEndMs = 42917),   // 12 bars @ 77bpm, -0.43 dB, join 12 ms
+        Item("wilderness", "Wilderness", "soft organ drone \u00b7 1:06 loop", loopStartMs = 14999, loopEndMs = 80974),   // 12 bars @ 44bpm, -0.14 dB, join 0 ms
+        Item("shepherd", "Shepherd", "piano and strings \u00b7 0:41 loop", loopStartMs = 3996, loopEndMs = 45137),   // 24 bars @ 140bpm, +0.14 dB, join 0 ms
     )
 
     fun of(name: String): Item? = ALL.firstOrNull { it.name == name }
