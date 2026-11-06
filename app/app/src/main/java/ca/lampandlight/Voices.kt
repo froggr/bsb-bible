@@ -1,39 +1,49 @@
 package ca.lampandlight
 
 /**
- * The English voices Phonon can read in.
+ * The voices the app reads in.
  *
  * Phonon finds voices in a `voices/` folder beside the weights, and names each one after its
- * file — `voices/Micah.safetensors` becomes "Micah". They are not in the model repository;
- * they live in `gradium/phonon-voices` under their opaque ids, so the name is ours to give.
+ * file — `voices/Silas.safetensors` becomes "Silas". They are not in the model repository;
+ * they live in `gradium/phonon-voices` under opaque ids, and the name is ours to give: the
+ * repository's own names are only in its README (Apache 2.0, nothing binds them), and "Grub
+ * the Ogre" is not a name for a Bible to read in.
  *
- * Each is a quarter of a megabyte, so the whole set is about 6 MB: small enough to offer
- * together, large enough not to ship in the APK for a reader who never turns narration on.
+ * Two kinds. The READERS are Gradium's catalogue voices, written for assistants and support
+ * lines; of the twenty-five English ones only two are kept, the two that hold up over an
+ * hour of reading. The CHARACTERS are the twelve English voices Gradium made with Voice
+ * Design — a sea captain, an ancient dragon, a snow queen — and heard reading scripture they
+ * are, by a distance, the better narrators: they have a chest, a pace and a point of view,
+ * where the catalogue voices have a smile. Joe, having heard all of them, 2026-11-06.
  *
- * Names, ids, ages and descriptions come from the repository's own `voices.jsonl`
- * (Apache 2.0). The descriptions are Gradium's words, not ours.
+ * Each is a quarter of a megabyte, so the whole set is about 3.5 MB.
  */
 object Voices {
 
     /**
      * One voice.
      *
-     * [steady] marks the ones worth trying first for a long reading. Gradium publishes no
-     * narration guidance at all, but it does publish an age for each voice, and that age
-     * predicts the prose: of the ten Middle-age voices the descriptions use calm words
-     * ("slow, patient delivery", "settled, even-toned", "easy, relaxed") nine times against
-     * one energetic; across every younger group it is one against nineteen. These voices
-     * were written for assistants and support lines — several descriptions say so — and
-     * "cuts through a music bed" is close to the opposite of what an hour of reading wants.
+     * [tempo] is how much faster than Phonon's own output the voice is played, pitch kept:
+     * the characters were designed to speak slowly and with weight, and at their natural
+     * pace a chapter drags. Measured on the same 47 words: Vyrmathrax took 19.3 s where
+     * Spencer took 15.8, so 1.25 brings him level — which is also the figure Joe settled on
+     * by ear for Scripture Radio. The reader's own Pace multiplies this.
+     *
+     * [warmth] is the sampling temperature, how much the voice is allowed to move. The
+     * runtime's default of 0.3 is steady and a little flat; 0.6 gives a reading voice its
+     * rise and fall, and the deepest character is wanted at 0.9, where his pitch spread
+     * went from 11 to 17 semitones and the reading stopped being a drone.
      */
     data class Voice(
         val name: String,
         val id: String,
-        val accent: String,
         val male: Boolean,
-        val age: String,
-        val steady: Boolean,
-        val about: String,
+        /** The short line under the name in the picker. */
+        val detail: String,
+        val tempo: Float = 1f,
+        val warmth: Float = 0.6f,
+        /** A Voice Design character rather than a catalogue voice. */
+        val character: Boolean = false,
     )
 
     const val BASE = "https://huggingface.co/gradium/phonon-voices/resolve/main/voices/"
@@ -41,67 +51,51 @@ object Voices {
     /** Where they go, relative to the model folder. Phonon looks here and nowhere else. */
     const val DIR = "voices"
 
-    /** Steadiest first, so the ones suited to a long reading are the ones in reach. */
+    /** The default reader, and what a saved choice that no longer exists falls back to. */
+    const val DEFAULT = "Spencer"
+
     val ALL = listOf(
-        Voice("Edwin", "zUCxzrOrugTSis03", "British", true, "Middle-age", true,
-            "Efficient and firm, sincere in attention, with tidy articulation that holds up at phone bandwidth."),
-        Voice("Hugh", "YyKcxPG7iIgS3jsK", "British", true, "Middle-age", true,
-            "Soft and close, airy in texture, with lively pitch movement and an attentive, sincere delivery."),
-        Voice("Spencer", "JOW0vchyswkQUMDS", "British", true, "Middle-age", true,
-            "Light and airy, sitting a touch higher, with crisp consonants and a slow, patient delivery."),
-        Voice("Bryony", "gfP44RlHwr2kEwk7", "British", false, "Middle-age", true,
-            "Full, rich mid-range tones, softly relaxed and spoken close to the mic, moving briskly with light pitch play."),
-        Voice("Preston", "qIxlZ7Ei8KvWlyQH", "American", true, "Middle-age", true,
-            "Trim, focused delivery with clean edges on every consonant and a steady, low-set core that carries through phone bandwidth."),
-        Voice("Trevor", "0zLApsZfVLLNaEGl", "American", true, "Middle-age", true,
-            "Buoyant energy over a resonant mid-low core, phrases landing softly and consonants cutting through a handset."),
-        Voice("Delia", "nGzMHMPAWGaJFHOo", "American", false, "Middle-age", true,
-            "Low, grounded and quick to the point, with a sincerity that keeps an apology honest."),
-        Voice("Everly", "vjFyp2BcCyTlUmYb", "American", false, "Middle-age", true,
-            "Rounded, soft-edged tone with gentle lift at the end of phrases and an easy, relaxed delivery."),
-        Voice("Hadley", "bXwrkHhURL1VFJdG", "American", false, "Middle-age", true,
-            "Settled, even-toned and genuinely kind, with crisp consonants that hold up over a handset."),
-        Voice("Toby", "dME3IWyZBvmh1n1q", "British", true, "Adult", false,
-            "A sparky, attentive British English adult voice that gets to the point with a smile. Ideal for fast, efficient customer support and helpful voice assistants."),
-        Voice("Imogen", "gDT1nz7Ie36ZhL-C", "British", false, "Adult", false,
-            "A bubbly, friendly British English adult voice that puts callers instantly at ease. Great for onboarding assistants and warm concierge interactions."),
-        Voice("Maeve", "6PWnV0Nq4wu7RVBT", "British", false, "Adult", false,
-            "A sparky, attentive British English adult voice that gets to the point with a smile. Ideal for fast, efficient customer support and helpful voice assistants."),
-        Voice("Pippa", "uem82D50GRv2Dwma", "British", false, "Adult", false,
-            "A confident, upbeat British English adult voice with infectious energy. Perfect for proactive assistants and motivating customer success calls."),
-        Voice("Russell", "_6Aslh2DxfmnRLmP", "American", true, "Adult", false,
-            "A high-energy American adult voice that pushes and encourages with the intensity of someone who genuinely believes in you."),
-        Voice("Harper", "4SZHfMpw-p46Ywgs", "American", false, "Adult", false,
-            "Modern, confident and friendly voice with a standard American accent."),
-        Voice("Zoey", "NbpkqMVS3CJeq2j8", "American", false, "Adult", false,
-            "Playful, upbeat and Gen Z energy voice with a standard American accent. Perfect for engaging conversations!"),
-        Voice("Alfie", "X6NceqF285Gr04gb", "British", true, "Young Adult", false,
-            "Punchy and forward, with crisp consonant attack and a pitch that lifts across a line, sitting high over a music bed."),
-        Voice("Teddy", "Zn7g6NxLqXlJb7Qi", "British", true, "Young Adult", false,
-            "Sparky and close in, quick off the mark, with firm consonants and the range to drop right down for a clause then come back up."),
-        Voice("Lottie", "m9MxpY6IUGXtWp76", "British", false, "Young Adult", false,
-            "Sparky and to the point, high forward energy with clean edges on the consonants and the range to drop low for one line then climb back."),
-        Voice("Easton", "LMDIYE0Oa377Qh6Z", "American", true, "Young Adult", false,
-            "Punchy and close in, with crisp consonant attack that cuts through a music bed and pitch that lifts across each line."),
-        Voice("Micah", "40QrMVgAxFiUnP9f", "American", true, "Young Adult", false,
-            "Buoyant and high in energy, with a playful lift at the ends of phrases and clean attack that survives a loud mix."),
-        Voice("Miles", "d9XCyhjo4JhkHF1d", "American", true, "Young Adult", false,
-            "Resonant and decisive, with genuine dynamic range, dropping right down for one clause then driving back up."),
-        Voice("Juniper", "NIWIOv5vTi5eRMj8", "American", false, "Young Adult", false,
-            "Cheerful presence with real resonance under it, personable when the copy turns intimate and decisive on the final line."),
-        Voice("Elodie-Rose", "y9bQqIDnyxwqK01t", "British", false, "Young", false,
-            "A young British voice with sharp, enthusiastic energy and crisp articulation, sparky and to the point for customer support and care."),
-        Voice("Freya", "GgfEkEJtxZR7gnpy", "British", false, "Young", false,
-            "A young British voice, glossy and confident with fast, girly chatter and bubbly sparkle, perfect for a friendly receptionist or assistant."),
+        // ---- readers: the two catalogue voices worth an hour
+        Voice("Spencer", "JOW0vchyswkQUMDS", true, "British · light, patient"),
+        Voice("Hadley", "bXwrkHhURL1VFJdG", false, "American · settled, kind"),
+
+        // ---- characters, renamed. The repository's name is in the comment.
+        Voice("Methuselah", "xO8xQo3BrB8FuI6J", true, "ancient, very deep, unhurried",     // Vyrmathrax the Ancient
+            tempo = 1.25f, warmth = 0.9f, character = true),
+        Voice("Aldric", "gSgG5Tor0GPEnqzC", true, "a master's measured authority",         // Master Aldric
+            tempo = 1.1f, character = true),
+        Voice("Silas", "xPDpsV3F592srkjA", true, "a sea captain, weathered and sure",       // Captain Silas Blackwater
+            tempo = 1.05f, character = true),
+        Voice("Bramwell", "y2eiKxtQo2B67deU", true, "a knight, courtly and warm",           // Sir Bramwell
+            character = true),
+        Voice("Mortlake", "lX3LavMNdlIbgEHH", true, "old, dry, close to the ear",           // Old Mortlake
+            character = true),
+        Voice("Og", "cYtsRSxV5q9IMehn", true, "a giant, slow and heavy",                    // Grub the Ogre
+            tempo = 1.1f, character = true),
+        Voice("Abner", "dGyGDKo2osj7h3s7", true, "dark and resonant",                      // Azgorath
+            tempo = 1.15f, character = true),
+        Voice("Hollis", "GXaSqMEmOg12OIYb", true, "hushed, strange, from the shadows",      // The Thing Under the Stairs
+            tempo = 1.1f, character = true),
+        Voice("Fennick", "cXoIXJ2llS8S0WOW", true, "young, bright, quick",                  // Fennick the Young Elf
+            character = true),
+        Voice("Morwenna", "nOykTmcH9ydsGGIc", false, "low, slow, from the deep",            // Morwenna of the Deep
+            tempo = 1.1f, character = true),
+        Voice("Esther", "NIWoEurJHMJjyUTe", false, "a queen, cool and clear",               // The Snow Queen
+            character = true),
+        Voice("Marian", "QXNr0SvkukLB4wPq", false, "a godmother, warm and twinkling",       // Fairy Godmother
+            tempo = 1.15f, character = true),
     )
 
     fun byName(name: String): Voice? = ALL.firstOrNull { it.name.equals(name, true) }
 
     /** The short line under a name in the picker. */
     fun describe(name: String): String? = byName(name)?.let {
-        "${it.accent} \u00b7 ${if (it.male) "male" else "female"}"
+        "${it.detail} · ${if (it.male) "male" else "female"}"
     }
 
-    /** Gradium's own description, for the voice a reader is weighing up. */
-    fun about(name: String): String? = byName(name)?.about
+    /** How fast [name] is played, pitch kept, before the reader's own pace is applied. */
+    fun tempo(name: String): Float = byName(name)?.tempo ?: 1f
+
+    /** The sampling temperature [name] reads at. */
+    fun warmth(name: String): Float = byName(name)?.warmth ?: Narrator.NARRATION_TEMP
 }

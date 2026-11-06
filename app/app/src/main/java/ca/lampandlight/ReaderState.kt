@@ -27,9 +27,17 @@ sealed interface Row {
         override val key: String,
     ) : Row
 
-    /** Something the reader wrote, against the verse it was written on. */
+    /**
+     * Something the reader wrote, drawn once, after the last verse it covers.
+     *
+     * A note belongs to a span, not to each verse in it: the same words under verse 13 and
+     * again under 14 read as two notes. [verse] is where it sits on the page — the last
+     * verse of the span on this page — and [start] the first, so the bracket down the
+     * margin and the note's label both know how far it reaches.
+     */
     data class Note(
         val verse: VerseId,
+        val start: VerseId,
         val text: String,
         val colour: MarkColor,
         override val key: String,
@@ -126,6 +134,25 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
     fun hasNote(v: VerseId): Boolean = noteOf(v) != null
 
     /**
+     * The colour of the noted mark covering [v], for the bracket in the margin.
+     *
+     * The bracket is in the mark's own colour, not a fixed one, so the span, its bracket and
+     * the note under it are visibly one thought.
+     */
+    fun noteBarOf(v: VerseId): MarkColor? = byVerse[v]
+        ?.lastOrNull { !it.note.isNullOrBlank() }
+        ?.let { MarkColor.of(it.color) ?: MarkColor.Gold }
+
+    /**
+     * The notes that end on each verse: the mark, and the first verse of it on this page.
+     *
+     * Built once per load. A mark may start in a verse this page does not show (it never
+     * does today — marks are made within a chapter — but a span is clamped to the page
+     * rather than trusted).
+     */
+    private var notesEnding by mutableStateOf<Map<VerseId, List<Pair<Mark, VerseId>>>>(emptyMap())
+
+    /**
      * Which words of [v] are inside a mark, as a half-open range over word indices.
      *
      * A mark that runs through the middle of a verse covers only part of it; one that merely
@@ -154,9 +181,16 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
      * noting over the top of an older highlight replaces it rather than layering on it.
      */
     fun noteRange(from: VerseId, to: VerseId, text: String) {
-        val lo = minOf(from, to)
-        val hi = maxOf(from, to)
-        val overlapping = bible.marks(lo.book, lo.chapter).filter { it.start <= hi && it.end >= lo }
+        val selLo = minOf(from, to)
+        val selHi = maxOf(from, to)
+        val overlapping = bible.marks(selLo.book, selLo.chapter)
+            .filter { it.start <= selHi && it.end >= selLo }
+        // The note is shown as the whole mark's, so editing it must keep the whole mark:
+        // opening the note of a 13–16 mark from verse 14 and saving used to cut the mark
+        // down to verse 14 alone. The span is the union of the selection and whatever it
+        // touched.
+        val lo = (overlapping.map { it.start } + selLo).min()
+        val hi = (overlapping.map { it.end } + selHi).max()
         // Keep the colour the reader already chose for any of it, rather than resetting
         // a span they had deliberately coloured.
         val colour = overlapping.firstOrNull()?.color ?: MarkColor.Gold.name.lowercase()
@@ -287,6 +321,16 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
             }
         }
         byVerse = map
+        // A note is drawn once, after the last verse of its mark that this page shows.
+        val ending = HashMap<VerseId, MutableList<Pair<Mark, VerseId>>>()
+        for (m in found) {
+            if (m.note.isNullOrBlank()) continue
+            val covered = verses.filter { it.id in m.start..m.end }
+            val first = covered.firstOrNull()?.id ?: continue
+            val last = covered.last().id
+            ending.getOrPut(last) { mutableListOf() }.add(m to first)
+        }
+        notesEnding = ending
         // Notes are rows of their own, so writing or clearing one changes the layout of the
         // chapter rather than just the colour of a verse. Relaid out here, after byVerse is
         // in place, because that is what rebuild() reads the notes from.
@@ -401,9 +445,14 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
             out += Row.Verse(v, i, splitWords(v.text), "v${v.id}")
 
             // A note is the reader's own writing: it shows whether or not study mode is on.
-            // Hiding someone's own words behind a mode would be the wrong way round.
-            noteOf(v.id)?.let { n ->
-                out += Row.Note(v.id, n, markOf(v.id) ?: MarkColor.Gold, "n${v.id}")
+            // Hiding someone's own words behind a mode would be the wrong way round. It is
+            // drawn ONCE, under the last verse of its span — not under each verse in it.
+            notesEnding[v.id]?.forEach { (m, first) ->
+                out += Row.Note(
+                    verse = v.id, start = first, text = m.note!!,
+                    colour = MarkColor.of(m.color) ?: MarkColor.Gold,
+                    key = "n${m.id}",
+                )
             }
             if (!study) return@forEachIndexed
             if (layers.footnotes)
@@ -542,9 +591,16 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
      *
      * Callers know verses, not lines, but study mode puts several lines against one verse,
      * so reading "from here" has to be translated into a position in the script.
+     *
+     * The FIRST line carrying the verse, not the first scripture line: a section heading is
+     * an aside that sits in front of its verse, and reading from the verse that opens a
+     * section should open with the heading — "The First Day" before "And God said". Skipping
+     * asides here is what made the headings seem never to be read: the chapter is mostly
+     * started from a verse, not from the top. A previous verse's commentary cannot be caught
+     * by this, because it carries that verse's index.
      */
     fun lineOfVerse(index: Int): Int =
-        narrationLines().indexOfFirst { !it.aside && it.verse == index }.coerceAtLeast(0)
+        narrationLines().indexOfFirst { it.verse == index }.coerceAtLeast(0)
 
     /**
      * Open the chapter.

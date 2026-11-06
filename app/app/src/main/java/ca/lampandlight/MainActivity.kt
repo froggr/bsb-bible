@@ -161,6 +161,24 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
         bed.restore(prefs.bed.ifBlank { null }, prefs.bedLevel)
         narrator.rate = prefs.rate
     }
+    // A chapter read to its end runs on into the next, unless asked not to. The next
+    // chapter's study material comes off disk, so in study mode the voice waits for it
+    // — briefly — rather than reading the verses and skipping the commentary.
+    LaunchedEffect(Unit) {
+        narrator.onChapterEnd = {
+            if (prefs.readOn) {
+                val was = state.book to state.chapter
+                state.nextChapter()
+                // Revelation 22 has no next chapter: nextChapter() leaves us where we are,
+                // and reading it again would be a loop.
+                if (was != (state.book to state.chapter)) scope.launch {
+                    var waited = 0
+                    while (state.studyLoading && waited < 40) { kotlinx.coroutines.delay(100); waited++ }
+                    narrator.speak(state.narrationLines(), 0)
+                }
+            }
+        }
+    }
     // Hold the music down while a verse is sounding, and let it up between them.
     LaunchedEffect(narrator.speaking) { bed.duck(narrator.speaking) }
 
@@ -256,6 +274,10 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
             onOpenVerse = { v, i ->
                 if (selection.isNotEmpty()) selection = emptySet()
                 acting = v to i
+            },
+            onOpenNote = { lo, hi ->
+                if (selection.isNotEmpty()) selection = emptySet()
+                noting = lo to hi
             },
         )
 

@@ -65,6 +65,8 @@ fun Reader(
     onSelect: (VerseId) -> Unit,
     onBookmark: (VerseId) -> Unit,
     onOpenVerse: (VerseId, Int) -> Unit,
+    /** Open the note written across a span, to read it in full or change it. */
+    onOpenNote: (VerseId, VerseId) -> Unit,
     onReadFrom: (Int) -> Unit,
     onStudyLayers: () -> Unit,
     /** Press-and-drag selection: start on a verse, extend, then mark on release. */
@@ -213,7 +215,7 @@ fun Reader(
                         reading = narrator.verseIndex == row.index,
                         mark = state.markOf(row.verse.id),
                         markedWords = state.markedWords(row.verse.id, row.words.size)?.first,
-                        noted = state.hasNote(row.verse.id),
+                        noteBar = state.noteBarOf(row.verse.id),
                         // The selection is a range: its two ends, and everything between.
                         selected = dragSpan?.let { (a, b) ->
                             row.verse.id >= minOf(a, b) && row.verse.id <= maxOf(a, b)
@@ -236,11 +238,16 @@ fun Reader(
                         onMarkTo = { windowY -> verseAtWindow(windowY)?.let { onDragTo(it) } },
                         onMarkEnd = onDragEnd,
                     )
-                    // Tapping a note opens the sheet it was written in, so reading one and
-                    // editing it are the same gesture.
-                    is Row.Note -> NoteRow(row.text, row.colour) {
-                        onOpenVerse(row.verse, state.rowOfVerse(0).coerceAtLeast(0))
-                    }
+                    // Tapping a note opens the sheet it was written in, on the whole span
+                    // it was written across, so reading one and editing it are the same
+                    // gesture. Going through the verse sheet instead would offer to note
+                    // one verse of a span.
+                    is Row.Note -> NoteRow(
+                        text = row.text,
+                        colour = row.colour,
+                        scope = if (row.start != row.verse)
+                            "verses ${row.start.verse}\u2013${row.verse.verse}" else null,
+                    ) { onOpenNote(row.start, row.verse) }
                     is Row.Footnote -> FootnoteRow(row.text)
                     is Row.Comment -> CommentRow(row.source, row.body)
                     is Row.Refs -> RefsRow(
@@ -342,7 +349,7 @@ private fun SectionHeading(text: String) {
         fontWeight = FontWeight.SemiBold,
         letterSpacing = 1.6.sp,
         color = p.gold,
-        modifier = Modifier.padding(top = 38.dp, bottom = 14.dp),
+        modifier = Modifier.padding(top = 26.dp, bottom = 10.dp),
     )
 }
 
@@ -378,7 +385,8 @@ private fun VerseBlock(
     mark: MarkColor?,
     /** Which words of this verse the mark covers, when it does not cover all of them. */
     markedWords: IntRange?,
-    noted: Boolean,
+    /** The colour of the note bracket down the margin, when the verse is written on. */
+    noteBar: MarkColor?,
     selected: Boolean,
     selecting: Boolean,
     onTapVerse: () -> Unit,
@@ -393,7 +401,6 @@ private fun VerseBlock(
 ) {
     val p = LocalPalette.current
     val scale = LocalTextScale.current
-    val indigo = p.indigo
     val glow by animateFloatAsState(if (reading) 1f else 0f, label = "reading")
 
     // Does the mark stop short of covering the whole verse? Decides whether the colour goes
@@ -447,10 +454,25 @@ private fun VerseBlock(
 
     // The padding is constant and the background only fades in: adding padding when a verse
     // starts being read reflowed every verse below it, which is what made the page shift.
+    // The bracket of a note runs down the margin in the mark's colour, through the gap
+    // below this verse and on — through the next verse of the span, and finally the note
+    // itself — as one unbroken line, the way a comment in a word processor brackets the
+    // whole passage it is about. So it is drawn BEFORE the bottom padding is taken off,
+    // and it reaches the full height.
+    val bracket = noteBar?.color(p.dark)?.let { if (p.dark) it.copy(alpha = 0.75f) else it }
     Box(
         Modifier
             .fillMaxWidth()
-            .padding(bottom = 17.dp)
+            .then(
+                if (bracket != null) Modifier.drawBehind {
+                    drawRect(
+                        color = bracket,
+                        topLeft = androidx.compose.ui.geometry.Offset(0f, 0f),
+                        size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height),
+                    )
+                } else Modifier
+            )
+            .padding(bottom = 9.dp)
             .background(
                 when {
                     selected -> p.gold.copy(alpha = 0.18f)
@@ -463,16 +485,6 @@ private fun VerseBlock(
             .then(
                 if (selected) Modifier.border(
                     1.5.dp, p.gold, RoundedCornerShape(5.dp)) else Modifier
-            )
-            .then(
-                // A verse you have written on carries a rule in the margin.
-                if (noted) Modifier.drawBehind {
-                    drawRect(
-                        color = indigo,
-                        topLeft = androidx.compose.ui.geometry.Offset(0f, 4f),
-                        size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height - 8f),
-                    )
-                } else Modifier
             )
             .padding(horizontal = 9.dp, vertical = 5.dp)
     ) {
@@ -492,7 +504,7 @@ private fun VerseBlock(
             fontFamily = ReadingFont,
             fontWeight = FontWeight.Light,
             fontSize = 19.sp * scale,
-            lineHeight = 34.sp * scale,
+            lineHeight = 27.sp * scale,
             color = p.ink,
             onTextLayout = { layout = it },
             modifier = Modifier
@@ -847,6 +859,26 @@ private fun PlayerBar(narrator: Narrator, state: ReaderState, bed: Bed, prefs: P
                                     prefs.rate = r; narrator.rate = r; prefs.save()
                                     open = null
                                 }
+                            }
+                        }
+                    }
+
+                    // "Then", because the label column fits one short word: it reads as
+                    // "Then: carry on" / "Then: stop", which is the question being asked.
+                    Setting(
+                        label = "Then",
+                        value = if (prefs.readOn) "Carry on" else "Stop",
+                        detail = null,
+                        on = open == "after",
+                        onTap = { open = if (open == "after") null else "after" },
+                    )
+                    if (open == "after") {
+                        Choices {
+                            Choice("Carry on", "into the next chapter", prefs.readOn) {
+                                prefs.readOn = true; prefs.save(); open = null
+                            }
+                            Choice("Stop", "at the end of this one", !prefs.readOn) {
+                                prefs.readOn = false; prefs.save(); open = null
                             }
                         }
                     }

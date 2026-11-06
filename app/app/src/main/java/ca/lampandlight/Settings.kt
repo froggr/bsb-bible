@@ -37,6 +37,8 @@ class Prefs(ctx: Context) {
     var bedLevel by mutableFloatStateOf(sp.getFloat("bedLevel", 0.5f))
     /** Narration speed, 0.9 to 1.3. */
     var rate by mutableFloatStateOf(sp.getFloat("rate", 1f))
+    /** Whether a chapter read to its end runs on into the next. */
+    var readOn by mutableStateOf(sp.getBoolean("readOn", true))
 
     /** Whether the chapter is laid out for study, and which layers show in it. */
     var study by mutableStateOf(sp.getBoolean("study", false))
@@ -120,6 +122,7 @@ class Prefs(ctx: Context) {
             .putString("bed", bed)
             .putFloat("bedLevel", bedLevel)
             .putFloat("rate", rate)
+            .putBoolean("readOn", readOn)
             .putString("colour", colour)
             .putBoolean("study", study)
             .putBoolean("studyComm", studyCommentary)
@@ -604,7 +607,7 @@ private fun MoreVoices(have: Int, busy: String?, progress: Float, onGet: () -> U
     val working = busy == "voices"
     Column(Modifier.padding(top = 14.dp)) {
         Text(
-            if (have == 0) "24 more voices \u00b7 British and American \u00b7 about 6 MB"
+            if (have == 0) "${Voices.ALL.size} voices \u00b7 two readers and twelve characters \u00b7 about 4 MB"
             else "$have of ${Voices.ALL.size} voices downloaded",
             fontFamily = UiFont, fontSize = 12.sp, color = p.inkSoft,
         )

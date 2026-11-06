@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -62,31 +63,42 @@ private val INDENT = 15.dp
  * Drawn in their highlight's colour and in the reading face, italic — of everything on this
  * page it is the only thing that is theirs, and it should read like a hand in the margin
  * rather than like more apparatus. This shows whether or not study mode is on.
+ *
+ * The bracket in the margin is the same one that runs down the verses above: the verse
+ * block draws it through its own height and the gap beneath, and this row carries it on
+ * to the foot of the note, so the span and the words written on it are joined by one line.
+ * [scope] names how far the note reaches ("verses 13–14") when that is more than one verse.
  */
 @Composable
-fun NoteRow(text: String, colour: MarkColor, onTap: () -> Unit) {
+fun NoteRow(text: String, colour: MarkColor, scope: String? = null, onTap: () -> Unit) {
     val p = LocalPalette.current
     val accent = colour.color(p.dark)
-    androidx.compose.material3.Surface(
-        color = accent.copy(alpha = if (p.dark) 0.13f else 0.3f),
-        shape = RoundedCornerShape(3.dp),
-        modifier = Modifier
-            .padding(start = INDENT, bottom = 16.dp)
+    val bracket = if (p.dark) accent.copy(alpha = 0.75f) else accent
+    val gap = 12.dp
+    Box(
+        Modifier
             .fillMaxWidth()
-            .clickable(
-                indication = null,
-                interactionSource = remember { MutableInteractionSource() },
-            ) { onTap() },
+            .drawBehind {
+                drawRect(
+                    color = bracket,
+                    topLeft = androidx.compose.ui.geometry.Offset(0f, 0f),
+                    size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height - gap.toPx()),
+                )
+            }
+            .padding(start = INDENT, bottom = gap)
     ) {
-        Row(Modifier.height(IntrinsicSize.Min)) {
-            // A bar in the mark's own colour, so a note and the highlight it belongs to are
-            // visibly the same thought.
-            Box(
-                Modifier.width(2.5.dp).fillMaxHeight()
-                    .background(if (p.dark) accent.copy(alpha = 0.75f) else accent)
-            )
-            Column(Modifier.padding(start = 11.dp, end = 12.dp, top = 9.dp, bottom = 10.dp)) {
-                Label("Your note", p.inkSoft)
+        androidx.compose.material3.Surface(
+            color = accent.copy(alpha = if (p.dark) 0.13f else 0.3f),
+            shape = RoundedCornerShape(3.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                ) { onTap() },
+        ) {
+            Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 9.dp, bottom = 10.dp)) {
+                Label(if (scope == null) "Your note" else "Your note \u00b7 $scope", p.inkSoft)
                 Spacer(Modifier.height(4.dp))
                 androidx.compose.material3.Text(
                     text,

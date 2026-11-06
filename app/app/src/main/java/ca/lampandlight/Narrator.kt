@@ -5,6 +5,9 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.PlaybackParams
+import android.os.Handler
+import android.os.Looper
 import android.system.Os
 import android.util.Log
 import androidx.compose.runtime.getValue
@@ -12,10 +15,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -64,20 +66,24 @@ class Narrator(private val ctx: Context) {
     var rate by mutableStateOf(1.0f)
 
     /**
-     * How much the voice is allowed to vary, 0 to 1.
+     * How much the voice is allowed to vary, 0 to 1. Set per voice: see [Voices.warmth].
      *
      * This is the variance of the noise fed to the flow solver, not a logit temperature:
      * the runtime takes its square root as a standard deviation. The runtime's own default
      * is 0.3 — the `"temp": 0.8` sitting in the checkpoint's config.json is stale metadata
-     * that nothing ever reads, so raising it to match that number only adds wobble.
+     * that nothing ever reads. 0.3 is steady and flat; the voices here read at 0.6, and the
+     * deepest at 0.9, which is where a reading gets its rise and fall back.
      */
-    var warmth by mutableStateOf(NARRATION_TEMP); private set
+    val warmth: Float get() = Voices.warmth(voice)
 
-    /** Set how much the voice may vary. Applies to the next sentence, not the one sounding. */
-    fun chooseWarmth(v: Float) {
-        warmth = v.coerceIn(0f, 1f)
-        runCatching { tts?.setTemperature(warmth) }
-    }
+    /** How fast the audio plays, pitch kept: the voice's own tempo under the reader's pace. */
+    private fun speed(): Float = rate * Voices.tempo(voice)
+
+    /**
+     * Called, on the main thread, when a chapter has been read to its end — not when it
+     * was stopped — so the reading can carry on into the next one.
+     */
+    var onChapterEnd: (() -> Unit)? = null
 
     private var tts: PhononTTS? = null
     private var job: Job? = null
@@ -116,17 +122,32 @@ class Narrator(private val ctx: Context) {
         tts?.let { return it }
         val cores = Runtime.getRuntime().availableProcessors()
         Os.setenv("RAYON_NUM_THREADS", (cores / 2).coerceIn(2, 6).toString(), true)
+        pruneVoices()
         val t = PhononTTS(File(ctx.filesDir, MODEL_DIR).path, "en")
         voices = t.voices
-        // The saved choice wins, then Micah, then whatever the checkpoint ships.
+        // The saved choice wins, then Spencer, then whatever the checkpoint ships.
         val saved = ctx.getSharedPreferences("reader", Context.MODE_PRIVATE).getString("voice", "")
         voice = t.voices.firstOrNull { it.equals(saved, true) }
-            ?: t.voices.firstOrNull { it.equals("Micah", true) }
+            ?: t.voices.firstOrNull { it.equals(Voices.DEFAULT, true) }
             ?: t.voices.firstOrNull() ?: "default"
         runCatching { t.setVoice(voice) }
         runCatching { t.setTemperature(warmth) }
         tts = t
         return t
+    }
+
+    /**
+     * Delete voices that are no longer offered.
+     *
+     * Phonon lists whatever is in the folder, so a voice dropped from [Voices.ALL] would go
+     * on appearing in the picker under its old name for anyone who had downloaded it. Done
+     * before the model opens, which is when the folder is read.
+     */
+    private fun pruneVoices() {
+        File(File(ctx.filesDir, MODEL_DIR), Voices.DIR).listFiles()?.forEach { f ->
+            if (f.isFile && f.name.endsWith(".safetensors") &&
+                Voices.byName(f.name.removeSuffix(".safetensors")) == null) f.delete()
+        }
     }
 
     /** Stop, and forget where we were: a different chapter starts at its beginning. */
@@ -135,6 +156,8 @@ class Narrator(private val ctx: Context) {
     fun chooseVoice(name: String) {
         voice = name
         runCatching { tts?.setVoice(name) }
+        // Each voice has its own temperature; the tempo lands with the next track built.
+        runCatching { tts?.setTemperature(warmth) }
     }
 
     /**
@@ -190,6 +213,11 @@ class Narrator(private val ctx: Context) {
             val track = buildTrack()
             live = track
             written = 0L
+            // The model runs on the narrator's own scope, not as a child of this job: a
+            // child's failure would cancel this coroutine with a bare CancellationException
+            // and lose the message. Through the channel the real error arrives instead.
+            var maker: Job? = null
+            var finished = false
             try {
                 val model = open()
                 preparing = false
@@ -201,20 +229,33 @@ class Narrator(private val ctx: Context) {
                         // "Matthew Henry writes." before the commentary, so the reader knows
                         // whose voice this is without looking at the screen. It is a clause
                         // of its own, over no words: nothing on the page lights for it.
-                        line.preamble?.let { add(i to Clause(IntRange.EMPTY, it)) }
+                        line.preamble?.let { add(i to Clause(IntRange.EMPTY, it, PAUSE_STOP)) }
                         clausesOf(line.words).forEach { add(i to it) }
                     }
                 }
-                // One clause of lookahead. Generation is ~4x faster than playback, so making
-                // the next clause while this one sounds hides it entirely; without this the
-                // reading stopped dead at every comma, waiting for the model.
-                var ahead: Deferred<FloatArray>? = null
-                for ((n, step) in script.withIndex()) {
+                // Generation runs ahead of playback through a short queue: one coroutine,
+                // in order — the model is a single native handle and is not shared — filling
+                // a channel that holds LOOKAHEAD finished clauses. One clause of lookahead
+                // was not enough: a three-word sentence followed by a thirty-word one
+                // stalled, because the long one took longer to make than the short one took
+                // to say. Phonon is ~4x faster than speech, so the queue is full nearly
+                // all the time and a long sentence has been made two clauses before it is
+                // needed.
+                val feed = Channel<Pair<Pair<Int, Clause>, FloatArray>>(LOOKAHEAD)
+                maker = scope.launch(Dispatchers.Default) {
+                    try {
+                        for (step in script) {
+                            if (!isActive) break
+                            feed.send(step to render(model, step.second))
+                        }
+                        feed.close()
+                    } catch (e: Throwable) {
+                        feed.close(e)
+                    }
+                }
+                for ((step, pcm) in feed) {
                     if (!isActive) break
                     val (i, clause) = step
-                    val pcm = (ahead ?: generate(model, clause)).await()
-                    ahead = script.getOrNull(n + 1)?.let { generate(model, it.second) }
-                    if (!isActive) break
                     val line = lines[i]
                     // An aside is read against the verse it belongs to, so the page keeps
                     // that verse marked while its commentary is spoken instead of going
@@ -224,19 +265,26 @@ class Narrator(private val ctx: Context) {
                     wordSpan = if (line.aside) null else clause.range
                     sayOne(track, line, clause, pcm)
                 }
-                ahead?.cancel()
                 drain(track)
+                finished = isActive
             } catch (e: Throwable) {
                 if (e !is kotlinx.coroutines.CancellationException) {
                     Log.e(TAG, "narration failed", e)
                     error = e.message ?: e::class.simpleName
                 }
             } finally {
+                maker?.cancel()
                 live = null
                 lineIndex = -1
                 runCatching { track.stop(); track.flush(); track.release() }
                 speaking = false; preparing = false
                 verseIndex = -1; wordIndex = -1; wordSpan = null
+            }
+            if (finished) {
+                // Read to the end, so the next press starts over — and whoever is listening
+                // may want the next chapter.
+                resumeAt = 0
+                Handler(Looper.getMainLooper()).post { onChapterEnd?.invoke() }
             }
         }
     }
@@ -257,7 +305,13 @@ class Narrator(private val ctx: Context) {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .setBufferSizeInBytes(maxOf(min, RATE * 2))
             .build()
-            .also { it.playbackRate = (RATE * rate).toInt(); it.play() }
+            .also {
+                // Time-stretched, not resampled: playbackRate would raise the pitch with the
+                // speed, and a deep voice played at 1.25x stops being deep. The playback head
+                // still counts source frames, which is what sayOne measures in.
+                it.playbackParams = PlaybackParams().setSpeed(speed()).setPitch(1f)
+                it.play()
+            }
     }
 
     /**
@@ -266,8 +320,11 @@ class Narrator(private val ctx: Context) {
      * Generation runs ahead of playback, so the frames are queued to a player thread; the
      * callback's FloatArray is a view of native memory ptts reuses, so it is copied first.
      */
-    /** A run of words spoken as one utterance, with where it sits in the verse. */
-    data class Clause(val range: IntRange, val text: String)
+    /**
+     * A run of words spoken as one utterance, with where it sits in the verse, and the
+     * silence in frames that follows it — decided by what ended it, see [clausesOf].
+     */
+    data class Clause(val range: IntRange, val text: String, val pause: Int = PAUSE_STOP)
 
     /**
      * What a clause should SOUND like, which is not always what it looks like.
@@ -328,9 +385,13 @@ class Narrator(private val ctx: Context) {
      * Split a verse into the pieces that will be spoken separately.
      *
      * Phonon splits on sentence boundaries internally anyway; doing it here means the app
-     * KNOWS where each piece starts and ends instead of guessing. Long sentences are broken
-     * again at a comma or semicolon, so no single lit span runs away down the page — but
-     * never so short that the voice loses its line.
+     * KNOWS where each piece starts and ends instead of guessing. Only a long sentence is
+     * broken again at a comma or semicolon. It used to happen at seven words, and that was
+     * audible: a clause generated on its own is finished by the model as if it were a
+     * sentence — the voice falls, and then there is the model's own tail of silence — so
+     * every comma became a full stop. Inside one utterance a comma is a breath, which is
+     * what it is on the page. The threshold is now high enough that most sentences stay
+     * whole; what a split costs in prosody it only buys back in a shorter lit span.
      */
     private fun clausesOf(words: List<String>): List<Clause> {
         val out = mutableListOf<Clause>()
@@ -342,33 +403,63 @@ class Narrator(private val ctx: Context) {
             val len = i - start + 1
             val last = i == words.lastIndex
             if (last || (hard && len >= MIN_CLAUSE) || (soft && len >= SOFT_CLAUSE)) {
-                out += Clause(start..i, words.subList(start, i + 1).joinToString(" "))
+                val pause = when {
+                    last -> PAUSE_VERSE
+                    hard -> PAUSE_STOP
+                    else -> PAUSE_BREATH
+                }
+                out += Clause(start..i, words.subList(start, i + 1).joinToString(" "), pause)
                 start = i + 1
             }
         }
         // A verse with no stop at all is one clause.
         if (out.isEmpty() && words.isNotEmpty())
-            out += Clause(words.indices, words.joinToString(" "))
+            out += Clause(words.indices, words.joinToString(" "), PAUSE_VERSE)
         return out
     }
 
     /**
-     * Make the audio for one clause, off the reading thread.
+     * Make the audio for one clause. Blocking; called from the generator coroutine.
      *
      * Returned whole rather than streamed. Phonon generates about four times faster than
      * speech, so a clause is ready long before the one before it has finished sounding —
      * and having the complete buffer means the highlight knows the true length of the
      * utterance from its first frame instead of dividing by a total that is still growing.
      */
-    private fun CoroutineScope.generate(model: PhononTTS, clause: Clause): Deferred<FloatArray> =
-        async(Dispatchers.Default) {
-            val parts = mutableListOf<FloatArray>()
-            model.speak(speakable(clause.text)) { pcm -> parts += pcm.copyOf(); true }
-            val out = FloatArray(parts.sumOf { it.size })
-            var at = 0
-            parts.forEach { System.arraycopy(it, 0, out, at, it.size); at += it.size }
-            out
-        }
+    private fun render(model: PhononTTS, clause: Clause): FloatArray {
+        // Debug-level, so the script can be read back from logcat when a device is the
+        // only ear available: which clauses were made, and what split them.
+        Log.d(TAG, "say [${clause.range}] ${clause.text}")
+        val parts = mutableListOf<FloatArray>()
+        model.speak(speakable(clause.text)) { pcm -> parts += pcm.copyOf(); true }
+        val raw = FloatArray(parts.sumOf { it.size })
+        var at = 0
+        parts.forEach { System.arraycopy(it, 0, raw, at, it.size); at += it.size }
+        return trimmed(raw, clause.pause)
+    }
+
+    /**
+     * Cut the model's own silence off both ends of an utterance and put back a pause of
+     * our choosing.
+     *
+     * Phonon leaves anything up to 150 ms before the first word and about 560 ms after the
+     * last, whatever the punctuation. Played back to back that is a full stop's worth of
+     * air after every comma the chapter was split at — the reading sounded as if it paused
+     * to think between clauses. So the silence is found and removed, and the gap that
+     * follows is decided by what ended the clause: a breath after a comma, a stop after a
+     * sentence, a beat longer at the end of a verse. A short run-in and run-out are kept so
+     * an onset or a final consonant is not clipped.
+     */
+    private fun trimmed(pcm: FloatArray, pause: Int): FloatArray {
+        val first = pcm.indexOfFirst { kotlin.math.abs(it) > SILENCE }
+        if (first < 0) return FloatArray(pause)
+        val last = pcm.indexOfLast { kotlin.math.abs(it) > SILENCE }
+        val from = (first - RUN_IN).coerceAtLeast(0)
+        val to = (last + RUN_OUT).coerceAtMost(pcm.size)
+        val out = FloatArray(to - from + pause)
+        System.arraycopy(pcm, from, out, 0, to - from)
+        return out
+    }
 
     /**
      * Play one clause and follow the voice through it.
@@ -386,9 +477,9 @@ class Narrator(private val ctx: Context) {
         // counting and each clause has to be measured from its own starting mark.
         val base = written
 
-        // Where speech actually starts: the model leaves anything from 1 ms to 150 ms of
-        // silence first, so it is found rather than assumed.
-        val lead = pcm.indexOfFirst { kotlin.math.abs(it) > 0.015f }.coerceAtLeast(0).toLong()
+        // Where speech actually starts. render() has trimmed the model's lead-in, so this
+        // is the short run-in it kept — found rather than assumed all the same.
+        val lead = pcm.indexOfFirst { kotlin.math.abs(it) > SILENCE }.coerceAtLeast(0).toLong()
 
         // How long each word holds the voice. Character count is a poor guide: "I" and
         // "through" differ by a factor of seven in letters but nothing like that in time.
@@ -402,9 +493,9 @@ class Narrator(private val ctx: Context) {
             var acc = 0f
             weights.forEachIndexed { i, w -> acc += w; bounds[i] = acc / total }
         }
-        // Phonon leaves about half a second of silence after the last word; measuring across
-        // the whole buffer would run the highlight ahead of the voice.
-        val spoken = (pcm.size - lead - TAIL_SILENCE).coerceAtLeast(1L)
+        // The buffer ends in the pause render() put there, which is not speech; measuring
+        // across it would run the highlight ahead of the voice.
+        val spoken = (pcm.size - lead - clause.pause).coerceAtLeast(1L)
 
         val watcher = scope.launch {
             while (isActive) {
@@ -543,9 +634,19 @@ class Narrator(private val ctx: Context) {
 
 
         private const val TAG = "lamplight"
-        /** Measured on the 31M model: it leaves about 0.6 s of silence after the last word,
-         *  consistently across utterance lengths. The lead-in varies, so it is detected. */
-        private const val TAIL_SILENCE = 13500L     // ~560 ms at 24 kHz
+        /** Below this a sample is silence, for finding where speech starts and stops. */
+        private const val SILENCE = 0.015f
+        /** Kept before the first loud sample and after the last, so an onset or a final
+         *  consonant is not clipped: 40 ms and 70 ms at 24 kHz. */
+        private const val RUN_IN = 960
+        private const val RUN_OUT = 1680
+        /** The air after a clause, in frames, by what ended it. A comma is a breath, a full
+         *  stop a pause, and a verse end a beat more — long enough to hear the number change. */
+        private const val PAUSE_BREATH = 4800       // 200 ms
+        private const val PAUSE_STOP = 9600         // 400 ms
+        private const val PAUSE_VERSE = 13200       // 550 ms
+        /** Finished clauses held ahead of playback. */
+        private const val LOOKAHEAD = 2
         /** Added to every word's syllable count, so short words still hold their turn. */
         private const val WORD_FLOOR = 0.7f
         /** Frames per blocking write. Small enough that write() paces the reading and a
@@ -553,9 +654,9 @@ class Narrator(private val ctx: Context) {
         private const val CHUNK = 2048
         /** Words a sentence must reach before it is worth lighting on its own. */
         private const val MIN_CLAUSE = 3
-        /** A comma only breaks a span once it has run this long. */
-        private const val SOFT_CLAUSE = 7
-        /** The runtime's own default, and steady enough to hold a chapter together. */
+        /** A comma only breaks a span once it has run this long. See [clausesOf]. */
+        private const val SOFT_CLAUSE = 24
+        /** The runtime's own default, for a voice not in [Voices]. The listed voices set their own. */
         const val NARRATION_TEMP = 0.3f
         const val RATE = 24000
         const val MODEL_DIR = "phonon-31m-en"

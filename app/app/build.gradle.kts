@@ -28,8 +28,8 @@ android {
         applicationId = "ca.lampandlight"
         minSdk = 29
         targetSdk = 36
-        versionCode = 35
-        versionName = "0.35"
+        versionCode = 36
+        versionName = "0.36"
         // Phonon ships arm64-v8a and x86_64 only; a 32-bit install would fail to load the .so.
         // ANDROID_ABIS=arm64-v8a builds a phone-only APK, about 9 MB smaller than one that
         // also carries the emulator's x86_64 library.
