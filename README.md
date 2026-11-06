@@ -1,12 +1,73 @@
 # BSB Bible
 
-A BSB study Bible for Android: read it, mark it up, and have it read aloud on the phone
-with no network and no subscription.
+An offline study Bible for Android: the Berean Standard Bible, read aloud in a natural voice,
+with highlights, notes and study material that sits inline with the text.
 
-Shipped publicly at **<https://github.com/froggr/bsb-bible/releases/latest>** — that link is
-what to give someone who wants to install it. The app updates itself from there.
+I vibe this mainly with fable 5.1 and opus 5.5. played architect,PM, and QA. This is a personal app and felt to share of it helps others. if you don't like the implementation or code then complain to anthropic. 
 
-Current release: **0.31**. See `STATUS.md` for what works, what is half-built and what is
+The Bible text is the Berean Standard Bible, unmodified.
+
+This readme may be slop 🤷 oh well. 😁
+
+## Install
+
+**[Download the latest version](https://github.com/froggr/bsb-bible/releases/latest)** — open
+`app.apk` on your phone and tap it.
+
+Android will ask whether to allow installing from your browser or files app. That prompt is
+normal for an app that does not come from the Play Store; you grant it once.
+
+Needs Android 10 or newer, and about 120 MB free once the voice is downloaded.
+
+## What it does
+
+- **The whole Bible, offline.** No account, no network needed to read.
+- **Read aloud.** A small neural voice runs on the phone — not a robotic system voice, and not
+  a cloud service. It highlights each phrase as it is spoken, and keeps reading with the screen
+  off. Optional quiet instrumental music can play underneath.
+- **Marking is fast.** Press and drag across verses to highlight the range; a note applies to the
+  whole span. Built to be usable during a sermon.
+- **Study mode.** Commentary, cross-references and footnotes appear between the verses rather
+  than behind a tap, so you can study while you read. Scripture stays the dominant text.
+- **It remembers where you were**, down to the verse.
+
+## Updates
+
+The app checks for new versions itself and offers to install them. You can also check by hand:
+**Marks & settings → Settings → About**.
+
+Updates are published here as new releases.
+
+## Optional downloads
+
+The app works fully offline on first install. From Settings you can add:
+
+- the **voice** for reading aloud (about 60 MB)
+- **study material** — Strong's numbers, cross-references (about 20 MB)
+- **commentary** (about 11 MB)
+- **music beds** — eight instrumental tracks (about 12 MB)
+
+## Why it is not on the Play Store
+
+It is a personal project, shared with friends. The Play Store also does not allow an app to
+update itself, which is how this one delivers new versions.
+
+## Text and credits
+
+The verse text is the **Berean Standard Bible**, chosen because it is freely available for
+anyone to use and share. Read-aloud uses the open-source **Phonon** speech model.
+
+This repository holds the source and the built releases. Questions or problems: open an issue.
+
+The read-aloud voice is a neural model running on your phone; it mispronounces things
+occasionally, and proper nouns are its weak spot.
+
+---
+
+# Working on it
+
+Everything below is for building and changing the app. `CLAUDE.md` holds the things that
+waste a session if rediscovered; `STATUS.md` what works, what is half-built and what is
 known broken.
 
 ## Where things are
