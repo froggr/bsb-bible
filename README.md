@@ -23,13 +23,18 @@ Needs Android 10 or newer, and about 120 MB free once the voice is downloaded.
 
 - **The whole Bible, offline.** No account, no network needed to read.
 - **Read aloud.** A small neural voice runs on the phone — not a robotic system voice, and not
-  a cloud service. It highlights each phrase as it is spoken, and keeps reading with the screen
-  off. Optional quiet instrumental music can play underneath.
+  a cloud service. It highlights each phrase as it is spoken, reads the section headings, keeps
+  reading with the screen off, and carries on into the next chapter unless you tell it to stop.
+  Fourteen voices to choose from. Optional quiet instrumental music can play underneath.
 - **Marking is fast.** Press and drag across verses to highlight the range; a note applies to the
   whole span. Built to be usable during a sermon.
 - **Study mode.** Commentary, cross-references and footnotes appear between the verses rather
   than behind a tap, so you can study while you read. Scripture stays the dominant text.
+- **Scripture cited in the commentary is a link.** Tap `Rom 5:6-8` and you are there.
 - **It remembers where you were**, down to the verse.
+- **Other apps can open it at a passage.** A `bsb://open?ref=John 3:16` link, or a BibleGateway,
+  YouVersion or BibleHub link, opens the app on that verse (details under *Opening the app at a
+  passage* below).
 
 ## Updates
 
@@ -42,7 +47,7 @@ Updates are published here as new releases.
 
 The app works fully offline on first install. From Settings you can add:
 
-- the **voice** for reading aloud (about 60 MB)
+- the **voice** for reading aloud (about 60 MB, plus about 4 MB for the fourteen voices)
 - **study material** — Strong's numbers, cross-references (about 20 MB)
 - **commentary** (about 11 MB)
 - **music beds** — eight instrumental tracks (about 12 MB)

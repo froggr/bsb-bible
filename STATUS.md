@@ -1,6 +1,6 @@
 # Status
 
-Last updated 2026-11-05, release **0.34**.
+Last updated 2026-11-06, release **0.38**.
 
 Install / share: <https://github.com/froggr/bsb-bible/releases/latest>
 
@@ -14,7 +14,7 @@ Install / share: <https://github.com/froggr/bsb-bible/releases/latest>
 | Narration: whole sentences, trimmed pauses, lookahead queue | Verified on the emulator 2026-11-06 from the clause log: Genesis 1 and Psalm 118 are read sentence by sentence (a 22-word sentence stays one utterance; before, anything past 7 words split at the first comma and every comma became a full stop). Clauses are made 2–3 ahead of playback. Not covered: listening — the emulator has no ear here; the pause lengths (200/400/550 ms) are chosen, not judged |
 | Section headings read aloud | Verified from the clause log: "The Creation", "The First Day", "Extol Him, All You Peoples" are generated and sounded. The report that they were not came from "Read from here", which skipped them as asides; `lineOfVerse` now starts on the heading. Local render: a two-word heading is 1.6 s at −9 dB peak, with or without a full stop |
 | Carrying on into the next chapter | Verified: Psalm 117 read to its end rolled into Psalm 118 heading-first, page and breadcrumb followed. Off switch is Then → Stop in the player. Not covered: study mode (the voice waits up to 4 s for the commentary to load before starting) |
-| Character voices at their own tempo and warmth | Verified: 14 voices download under their new names (Spencer, Hadley, twelve characters), old files are pruned, Methuselah plays at 1.25× via PlaybackParams with the word highlight still in step. Not covered: the tempo and warmth figures for the eleven characters other than Methuselah are derived (durations on the same 47 words), not chosen by ear |
+| Fourteen voices, each at its own warmth | Verified on the emulator 2026-11-06: Spencer, Hadley and the twelve renamed characters download under their new names, old files are pruned, and each reads at its own sampling temperature (Methuselah 0.9, the rest 0.6). No voice has a baked-in tempo: 0.36 played Methuselah at 1.25× and Joe found it "way too much", so speed is the Pace control alone (0.37). Not covered: the warmth figures for the characters other than Methuselah are the same 0.6, not chosen by ear |
 | A note on a range shows once, bracketed | Verified on the emulator 2026-11-06: a note on Genesis 1:1–2 draws once under verse 2 with one unbroken bar from verse 1 to the foot of the note, labelled "verses 1–2"; tapping it edits the span; editing from verse 2's own sheet keeps the mark at 1–2 (it used to shrink it to one verse). Not covered: dark theme, study mode interleaving, narration of the note |
 | Read-aloud with phrase highlight | In use; gapless after the one-clause lookahead fix |
 | Music beds, intro-then-loop | PCM loop via AudioTrack. 45 s of unbroken playback on an 11.5 s loop — four joins crossed, the track never stopped |
