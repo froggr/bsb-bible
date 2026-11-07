@@ -26,10 +26,15 @@ Needs Android 10 or newer, and about 120 MB free once the voice is downloaded.
   a cloud service. It highlights each phrase as it is spoken, reads the section headings, keeps
   reading with the screen off, and carries on into the next chapter unless you tell it to stop.
   Fourteen voices to choose from. Optional quiet instrumental music can play underneath.
-- **Marking is fast.** Press and drag across verses to highlight the range; a note applies to the
-  whole span. Built to be usable during a sermon.
+- **Marking is fast.** Tap a verse number to select the verse; tap another and everything
+  between is selected. Then pick a colour or write a note, and it applies to the whole span.
+  Press and drag works too. Built to be usable during a sermon.
 - **Study mode.** Commentary, cross-references and footnotes appear between the verses rather
-  than behind a tap, so you can study while you read. Scripture stays the dominant text.
+  than behind a tap, so you can study while you read. Scripture stays the dominant text. A
+  commentary paragraph on a run of verses shows once, under the last of them, with a bracket
+  down the margin from the first — the way a comment brackets a passage in a word processor.
+  A translator's note marks the words it is about with a small letter and a dotted underline,
+  and quotes them.
 - **Scripture cited in the commentary is a link.** Tap `Rom 5:6-8` and you are there.
 - **It remembers where you were**, down to the verse.
 - **Other apps can open it at a passage.** A `bsb://open?ref=John 3:16` link, or a BibleGateway,
@@ -159,6 +164,11 @@ Notes on the data, learned the hard way:
 
 - The BSB's own footnotes are **translator's notes** (variants, literal readings, alternate
   renderings), not commentary. Commentary comes from the SWORD modules.
+- A footnote sits on the **word slot it annotates** in `tables.tsv`, but the page splits the
+  verse on spaces and a slot is a phrase ("an expanse"). `build.py` aligns each slot to the
+  reading text in order, at a word boundary, and stores the display-word range as
+  `footnotes.w_start`/`w_end`; 4,815 of 4,854 place, and the rest are psalm superscriptions.
+  A note on an alignment placeholder (`. . .`) takes the phrase before it.
 - In `bsb_tables.tsv`, punctuation lives in `pnc`/`begQ`/`endQ`, not in the word cell, and
   `begQ` can carry verse-number markup that must be stripped.
 - A word cell of `-` marks an original-language word with no English equivalent (e.g. the
@@ -181,7 +191,7 @@ Notes on the data, learned the hard way:
 
 | Screen | |
 |---|---|
-| Reader | chapter text, narration with the word lit as it is spoken, long-press to mark |
+| Reader | chapter text, narration with the word lit as it is spoken, tap a number to select, long-press for the sheet |
 | Study sheet | word (Hebrew/Greek, Strong's, parsing), cross-references, translators' notes, commentary |
 | Note sheet | writing on a verse, with the verse in front of you |
 | Search | full text, debounced, matches emboldened |
@@ -192,6 +202,10 @@ Notes on the data, learned the hard way:
 **Study mode** interleaves the apparatus between verses — notes, footnotes, commentary,
 cross-references — as its own `Row` types, so the LazyColumn still only composes what is on
 screen. Scripture stays the dominant text: nothing else uses the reading face at reading size.
+A note or a commentary paragraph covering several verses is one `Row`, under the last verse
+of its span, and every row from the span's first verse down to it carries a `Margin` — the
+bracket lanes `rebuild()` works out row by row, because only the layout knows what sits
+between a span's first verse and its last (a heading, a footnote, another commentator).
 
 **Music beds** play their run-in once and then loop a region of the file forever
 (`Beds.Item.loopStartMs`/`loopEndMs`, found by PyMusicLooper). The region is decoded to PCM once

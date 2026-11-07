@@ -19,11 +19,13 @@ Design notes:
 import csv, html, json, pathlib, re, sqlite3, sys, hashlib, struct, zlib
 
 # Bump when the verse text itself changes, so phones replace the copy they unpacked.
+#   4 — footnotes carry the display-word range they annotate (w_start, w_end), and keep
+#       the translators' italics as *asterisks*.
 #   3 — HTML entities decoded: the Psalm 119 acrostic headings carried their Hebrew
 #       letter as "&#1488;" and showed it raw on the page.
 #   2 — text taken from bsb.txt: dropped the vvv/-/'. . .' alignment placeholders, restored
 #       the closing quotes, stopped inventing ellipses, whole psalm superscriptions.
-TEXT_VERSION = 3
+TEXT_VERSION = 4
 
 HERE = pathlib.Path(__file__).parent
 SRC = HERE / "src"
@@ -82,6 +84,9 @@ CREATE TABLE words (
 
 CREATE TABLE footnotes (
   verse INTEGER NOT NULL, idx INTEGER NOT NULL, text TEXT NOT NULL,
+  -- The words of the verse the note is about, as indices into text.split(' '), inclusive;
+  -- -1 when the note could not be placed (a psalm superscription, say).
+  w_start INTEGER NOT NULL DEFAULT -1, w_end INTEGER NOT NULL DEFAULT -1,
   PRIMARY KEY (verse, idx)) WITHOUT ROWID;
 
 CREATE TABLE xrefs (
@@ -204,9 +209,13 @@ def read_bsb():
                 "footnotes": [],
             }
             if meta["subheading"]: meta["heading"] = None
-        fn = txt(G(row, "footnotes"))
-        if fn and meta is not None and fn not in meta["footnotes"]:
-            meta["footnotes"].append(fn)
+        # A footnote sits on the word slot it annotates. Keep the slot, so the page can
+        # mark the word; keep the translators' italics as *asterisks*, the way the Tyndale
+        # notes carry theirs, so "Or *a canopy*" reads as an alternative rendering.
+        fn = txt(G(row, "footnotes").replace("<i>", "*").replace("</i>", "*"))
+        if fn and meta is not None and fn not in [t for t, _ in meta["footnotes"]]:
+            w_here = txt(G(row, "BSB version"))
+            meta["footnotes"].append((fn, len(words) if w_here else len(words) - 1))
         w = txt(G(row, "BSB version"))
         if w:
             words.append({
@@ -259,8 +268,57 @@ def strip_title(body, title):
     return body
 
 
+def align(words, body, skip):
+    """Where each word slot falls in the reading text, as a display-word range.
+
+    The page splits the verse on spaces, so a footnote on the slot "an expanse" has to be
+    expressed as "display words 6 to 7". Each slot's phrase is searched for in order, at a
+    word boundary, from where the last one ended; a slot that cannot be found (the tables
+    and bsb.txt differ in brackets and dashes here and there) is None, and the search goes
+    on from the same place rather than guessing.
+    """
+    out = []
+    cursor = 0
+    for w in words[skip:]:
+        phrase = w["text"].strip()
+        if is_placeholder(phrase) or not phrase:
+            out.append(None); continue
+        # Brackets mark words supplied by the translators; bsb.txt sets them without.
+        phrase = phrase.replace("[", "").replace("]", "")
+        m = re.compile(r"(?<![\w\u2019'])" + re.escape(phrase) + r"(?![\w\u2019'])").search(body, cursor)
+        if not m:
+            out.append(None); continue
+        out.append((word_index(body, m.start()), word_index(body, m.end() - 1)))
+        cursor = m.end()
+    return out
+
+
+def word_index(body, pos):
+    """Which display word (index into the page's split on spaces) character [pos] is in."""
+    before = body[:pos]
+    n = len(before.split())
+    return n if (not before or before[-1].isspace()) else n - 1
+
+
+def anchor(placed, slot, skip):
+    """The display-word range a footnote on word slot [slot] annotates, or (-1, -1).
+
+    A note on an alignment placeholder (". . .") is about the phrase before it, so it takes
+    that slot's last word; one inside a psalm superscription has no place on the verse.
+    """
+    k = slot - skip
+    if k < 0 or k >= len(placed): return -1, -1
+    if placed[k] is not None: return placed[k]
+    for j in range(k - 1, -1, -1):
+        if placed[j] is not None:
+            return placed[j][1], placed[j][1]
+    return -1, -1
+
+
 def load_bible(db):
     nv = nw = nf = 0
+    global nplaced
+    nplaced = 0
     canon = read_text()
     missing = 0
     for ref, meta, words in read_bsb():
@@ -310,11 +368,17 @@ def load_bible(db):
               w["parsing"] or None, w["lang"] or None, w["punct"] or None, w["open_q"] or None,
               1 if is_placeholder(w["text"]) else 0) for p, w in enumerate(words)])
         nw += len(words)
-        db.executemany("INSERT INTO footnotes(verse,idx,text) VALUES(?,?,?)",
-                       [(i, k, t) for k, t in enumerate(meta["footnotes"])])
+        placed = align(words, body, skip)
+        rows = []
+        for k, (t, slot) in enumerate(meta["footnotes"]):
+            ws, we = anchor(placed, slot, skip)
+            rows.append((i, k, t, ws, we))
+            if ws >= 0: nplaced += 1
+        db.executemany("INSERT INTO footnotes(verse,idx,text,w_start,w_end) VALUES(?,?,?,?,?)", rows)
         nf += len(meta["footnotes"])
     if missing:
         print(f"  note: {missing} verses not in bsb.txt; text assembled from the tables")
+    print(f"  {nplaced:,} of {nf:,} footnotes placed on their words")
     return nv, nw, nf
 
 
@@ -521,7 +585,7 @@ def load_omitted(db):
         prev = db.execute(
             "SELECT text FROM footnotes WHERE verse=? ORDER BY idx", (vid(book, ch, v - 1),)
         ).fetchall()
-        note = next((t for (t,) in prev if re.search(r"\binclude\b", t)), None)
+        note = next((t.replace("*", "") for (t,) in prev if re.search(r"\binclude\b", t)), None)
         rows.append((i, NUM[book], ch, v, note))
     db.executemany("INSERT INTO omitted(id,book,chapter,verse,note) VALUES(?,?,?,?,?)", rows)
     return len(rows)

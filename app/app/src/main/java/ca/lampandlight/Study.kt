@@ -18,8 +18,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,9 +45,9 @@ fun StudySheet(
     val words = remember(verse) { bible.words(verse) }
     val refs = remember(verse) { bible.crossRefs(verse) }
     val comm = remember(verse) { bible.commentary(verse) }
-    val notes = remember(verse) {
-        bible.chapter(verse.book, verse.chapter).firstOrNull { it.id == verse }?.footnotes ?: emptyList()
-    }
+    val row = remember(verse) { bible.chapter(verse.book, verse.chapter).firstOrNull { it.id == verse } }
+    val notes = row?.footnotes ?: emptyList()
+    val verseText = row?.text.orEmpty()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -112,7 +115,7 @@ fun StudySheet(
                     when (tabs[safeTab]) {
                         "Word" -> WordPane(words, wordAt)
                         "Links" -> LinkPane(bible, refs, onGo)
-                        "Notes" -> NotePane(notes)
+                        "Notes" -> NotePane(notes, verseText)
                         "Commentary" -> CommentaryPane(comm)
                     }
                 }
@@ -231,8 +234,9 @@ private fun LinkPane(bible: Bible, refs: List<CrossRef>, onGo: (VerseId) -> Unit
 }
 
 @Composable
-private fun NotePane(notes: List<String>) {
+private fun NotePane(notes: List<Footnote>, verseText: String) {
     val p = LocalPalette.current
+    val words = remember(verseText) { ReaderState.splitWords(verseText) }
     Column(Modifier.verticalScroll(rememberScrollState())) {
         Text(
             "The translators' own notes: other readings, manuscript differences, and what the " +
@@ -240,12 +244,29 @@ private fun NotePane(notes: List<String>) {
             fontFamily = UiFont, fontSize = 12.sp, color = p.inkSoft,
             modifier = Modifier.padding(bottom = 14.dp),
         )
-        notes.forEach {
-            Text(
-                it,
-                fontFamily = UiFont, fontSize = 13.sp, lineHeight = 21.sp, color = p.ink,
-                modifier = Modifier.padding(bottom = 13.dp),
-            )
+        notes.forEachIndexed { k, n ->
+            // Lettered and quoted the same way as on the page, so the two agree.
+            val phrase = n.words?.let { r ->
+                words.slice(r.first.coerceIn(words.indices)..r.last.coerceIn(words.indices))
+                    .joinToString(" ").trim { !it.isLetterOrDigit() }
+            }
+            Row(Modifier.padding(bottom = 13.dp)) {
+                Text(
+                    noteLetter(k), fontFamily = UiFont, fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold, color = p.indigo,
+                    modifier = Modifier.width(16.dp).padding(top = 2.dp),
+                )
+                Text(
+                    buildAnnotatedString {
+                        if (phrase != null) {
+                            withStyle(SpanStyle(fontWeight = FontWeight.Medium)) { append(phrase) }
+                            append("  ")
+                        }
+                        append(italicised(n.text))
+                    },
+                    fontFamily = UiFont, fontSize = 13.sp, lineHeight = 21.sp, color = p.ink,
+                )
+            }
         }
     }
 }

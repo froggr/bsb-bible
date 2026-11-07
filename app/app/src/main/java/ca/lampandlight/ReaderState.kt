@@ -18,13 +18,29 @@ import androidx.compose.runtime.toMutableStateList
 sealed interface Row {
     val key: String
 
-    data class Heading(val text: String, override val key: String) : Row
-    data class Title(val text: String, override val key: String) : Row
+    /** What runs down the margin beside this row. See [Margin]. */
+    val margin: Margin
+
+    data class Heading(
+        val text: String, override val key: String,
+        override val margin: Margin = Margin(),
+    ) : Row
+    data class Title(
+        val text: String, override val key: String,
+        override val margin: Margin = Margin(),
+    ) : Row
     data class Verse(
         val verse: ca.lampandlight.Verse,
         val index: Int,              // position within the chapter, for the narrator
         val words: List<String>,
         override val key: String,
+        override val margin: Margin = Margin(),
+        /**
+         * For each translator's note on the verse, the words it is about — or null when it
+         * has no place in the text. Empty unless the notes are on the page, so reading mode
+         * draws the verse clean.
+         */
+        val noteAnchors: List<IntRange?> = emptyList(),
     ) : Row
 
     /**
@@ -41,14 +57,23 @@ sealed interface Row {
         val text: String,
         val colour: MarkColor,
         override val key: String,
+        override val margin: Margin = Margin(),
     ) : Row
 
-    /** A paragraph of commentary. [source] is the short key: "mhc", "jfb". */
+    /**
+     * A paragraph of commentary, drawn once, after the last verse it covers.
+     *
+     * The same shape as a note: [verse] is the last verse of the paragraph's span on this
+     * page and [start] the first. A paragraph on one verse has the two equal.
+     * [source] is the short key: "tyn", "mhc", "jfb".
+     */
     data class Comment(
         val verse: VerseId,
+        val start: VerseId,
         val source: String,
         val body: String,
         override val key: String,
+        override val margin: Margin = Margin(),
     ) : Row
 
     /** The cross-references for one verse, drawn as a single line of links. */
@@ -56,15 +81,37 @@ sealed interface Row {
         val verse: VerseId,
         val refs: List<CrossRef>,
         override val key: String,
+        override val margin: Margin = Margin(),
     ) : Row
 
-    /** A translator's footnote: the apparatus a study Bible sets at the foot of the page. */
+    /**
+     * A translator's footnote: the apparatus a study Bible sets at the foot of the page.
+     *
+     * [letter] is its index among the verse's notes, and the same letter marks the place
+     * in the verse; [phrase] is the words it is about, quoted so the note reads without
+     * looking back up.
+     */
     data class Footnote(
         val verse: VerseId,
         val text: String,
+        val letter: Int,
+        val phrase: String?,
         override val key: String,
+        override val margin: Margin = Margin(),
     ) : Row
 }
+
+/**
+ * What passes down the margin beside a row and carries on below it.
+ *
+ * A note and a commentary paragraph each cover a span of verses, and each is drawn once,
+ * at the end of its span; the bracket is what joins the words written on to the writing.
+ * So every row the span runs through — the verses, a heading between them, a footnote
+ * under one of them — draws the bracket through its own full height, and the row the
+ * span ends on draws the last stretch itself, down to the foot of the note. Two lanes at
+ * most: the reader's note, in its mark's colour, and commentary, thinner and quieter.
+ */
+data class Margin(val note: MarkColor? = null, val comment: Boolean = false)
 
 /** What study mode puts on the page. Notes are not here: those are never hidden. */
 data class StudyLayers(
@@ -132,16 +179,6 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
         it.note?.takeIf { n -> n.isNotBlank() }
     }
     fun hasNote(v: VerseId): Boolean = noteOf(v) != null
-
-    /**
-     * The colour of the noted mark covering [v], for the bracket in the margin.
-     *
-     * The bracket is in the mark's own colour, not a fixed one, so the span, its bracket and
-     * the note under it are visibly one thought.
-     */
-    fun noteBarOf(v: VerseId): MarkColor? = byVerse[v]
-        ?.lastOrNull { !it.note.isNullOrBlank() }
-        ?.let { MarkColor.of(it.color) ?: MarkColor.Gold }
 
     /**
      * The notes that end on each verse: the mark, and the first verse of it on this page.
@@ -425,7 +462,7 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
         val vs = bible.chapter(book, chapter)
         verses = vs
         // The chapter changed, so last chapter's commentary must not show against it.
-        commentary = emptyMap(); refs = emptyMap(); studyFor = null
+        commentary = emptyList(); refs = emptyMap(); studyFor = null
         loadMarks()          // lays the chapter out; notes are rows, so they must be known
         if (study) fetchStudy()
     }
@@ -437,34 +474,88 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
      * and they are looking for it; then the translators' footnote, which is about the text
      * itself; then commentary, which is someone's opinion of it; then the cross-references,
      * which lead away from the page and so belong last.
+     *
+     * A note or a commentary paragraph that covers several verses is drawn ONCE, under the
+     * last of them, and every row from its first verse down to it carries its bracket in
+     * the margin — see [Margin]. The bracket is worked out here, row by row, because only
+     * the layout knows what sits between a span's first verse and its last.
      */
     private fun rebuild() {
         val out = mutableListOf<Row>()
+        // The reader's notes on this page. Overlapping marks swallow each other, so at most
+        // one covers any verse.
+        val noted = marks.filter { !it.note.isNullOrBlank() }
+        // Commentary that reaches past one verse: the only kind that wants a bracket.
+        val long = if (study) commentary.filter { layers.shows(it.source) && it.start != it.end }
+                   else emptyList()
+        val ending = if (study) commentary.filter { layers.shows(it.source) }.groupBy { it.end }
+                     else emptyMap()
+        // The note lane at verse [v]: the colour of a note covering it, when the note also
+        // reaches past it ([beyond]) or merely reaches it.
+        fun noteLane(v: VerseId, beyond: Boolean): MarkColor? = noted
+            .lastOrNull { it.start <= v && (if (beyond) it.end > v else it.end >= v) }
+            ?.let { MarkColor.of(it.color) }
+        fun commentLane(v: VerseId, beyond: Boolean): Boolean = long
+            .any { it.start <= v && (if (beyond) it.end > v else it.end >= v) }
+
         verses.forEachIndexed { i, v ->
-            v.heading?.let { out += Row.Heading(it, "h$i") }
-            v.subheading?.let { out += Row.Heading(it, "s$i") }
-            v.psalmTitle?.let { out += Row.Title(it, "t$i") }
-            out += Row.Verse(v, i, splitWords(v.text), "v${v.id}")
+            // A heading between two verses carries whatever spans both of them.
+            val prev = verses.getOrNull(i - 1)?.id
+            val above = if (prev != null) Margin(noteLane(prev, true), commentLane(prev, true))
+                        else Margin()
+            v.heading?.let { out += Row.Heading(it, "h$i", above) }
+            v.subheading?.let { out += Row.Heading(it, "s$i", above) }
+            v.psalmTitle?.let { out += Row.Title(it, "t$i", above) }
+
+            val words = splitWords(v.text)
+            val showNotes = study && layers.footnotes
+            out += Row.Verse(
+                v, i, words, "v${v.id}",
+                margin = Margin(noteLane(v.id, false), commentLane(v.id, false)),
+                noteAnchors = if (showNotes) v.footnotes.map { it.words } else emptyList(),
+            )
 
             // A note is the reader's own writing: it shows whether or not study mode is on.
             // Hiding someone's own words behind a mode would be the wrong way round. It is
             // drawn ONCE, under the last verse of its span — not under each verse in it.
+            // It closes its own lane; only commentary passes through it.
             notesEnding[v.id]?.forEach { (m, first) ->
                 out += Row.Note(
                     verse = v.id, start = first, text = m.note!!,
                     colour = MarkColor.of(m.color) ?: MarkColor.Gold,
                     key = "n${m.id}",
+                    margin = Margin(null, commentLane(v.id, false)),
                 )
             }
             if (!study) return@forEachIndexed
-            if (layers.footnotes)
-                v.footnotes.forEachIndexed { k, f -> out += Row.Footnote(v.id, f, "f${v.id}_$k") }
-            commentary[v.id]?.forEach { c ->
-                if (layers.shows(c.source))
-                    out += Row.Comment(v.id, c.source, c.body, "c${v.id}_${c.source}")
+            if (showNotes)
+                v.footnotes.forEachIndexed { k, f ->
+                    out += Row.Footnote(
+                        v.id, f.text, k,
+                        phrase = f.words?.let { r ->
+                            words.slice(r.first.coerceIn(words.indices)..r.last.coerceIn(words.indices))
+                                .joinToString(" ").trim { !it.isLetterOrDigit() }
+                        },
+                        key = "f${v.id}_$k",
+                        margin = Margin(noteLane(v.id, true), commentLane(v.id, false)),
+                    )
+                }
+            val here = ending[v.id].orEmpty()
+            here.forEachIndexed { k, c ->
+                // The lane passes through this paragraph if another span is still open:
+                // one reaching past this verse, or one ending here but drawn after it.
+                val still = commentLane(v.id, true) ||
+                    here.drop(k + 1).any { it.start != it.end }
+                out += Row.Comment(
+                    v.id, c.start, c.source, c.body, "c${c.start}_${c.source}",
+                    margin = Margin(noteLane(v.id, true), still),
+                )
             }
             if (layers.refs)
-                refs[v.id]?.takeIf { it.isNotEmpty() }?.let { out += Row.Refs(v.id, it, "x${v.id}") }
+                refs[v.id]?.takeIf { it.isNotEmpty() }?.let {
+                    out += Row.Refs(v.id, it, "x${v.id}",
+                        Margin(noteLane(v.id, true), commentLane(v.id, true)))
+                }
         }
         rows = out
     }
@@ -483,7 +574,7 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
     var studyLoading by mutableStateOf(false)
         private set
 
-    private var commentary by mutableStateOf<Map<VerseId, List<Commentary>>>(emptyMap())
+    private var commentary by mutableStateOf<List<CommentSpan>>(emptyList())
     private var refs by mutableStateOf<Map<VerseId, List<CrossRef>>>(emptyMap())
 
     /** The chapter the loaded study material belongs to, so it is fetched once. */

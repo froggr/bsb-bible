@@ -23,8 +23,20 @@ data class Verse(
     val subheading: String?,
     val psalmTitle: String?,
     val xrefNote: String?,
-    val footnotes: List<String> = emptyList(),
+    val footnotes: List<Footnote> = emptyList(),
 )
+
+/**
+ * A translator's note, and the words of the verse it is about.
+ *
+ * [wordStart]..[wordEnd] index the verse as the page splits it (on spaces), inclusive; -1
+ * when the note could not be placed, which is the psalm superscriptions. The text keeps
+ * the translators' italics as `*asterisks*`, like the Tyndale notes.
+ */
+data class Footnote(val text: String, val wordStart: Int, val wordEnd: Int) {
+    val anchored: Boolean get() = wordStart >= 0 && wordEnd >= wordStart
+    val words: IntRange? get() = if (anchored) wordStart..wordEnd else null
+}
 
 /** One BSB word group, with everything behind it. */
 data class Word(
@@ -46,6 +58,15 @@ data class Word(
 
 data class CrossRef(val dst: VerseId, val dstEnd: VerseId?, val votes: Int)
 data class Commentary(val source: String, val body: String)
+
+/**
+ * One commentator's paragraph and the run of verses it covers on a page.
+ *
+ * Matthew Henry writes on passages and Tyndale on ranges, and the table links the same
+ * paragraph to every verse in the range. On the page it is one thing about verses
+ * [start] to [end], so it is drawn once with a bracket down the margin, not once per verse.
+ */
+data class CommentSpan(val source: String, val body: String, val start: VerseId, val end: VerseId)
 
 /**
  * Reading order for the commentaries: plainest first.
@@ -96,19 +117,20 @@ class Bible private constructor(private val db: SQLiteDatabase) {
 
     /** Every verse of a chapter, in order, with footnotes attached. */
     fun chapter(book: Int, chapter: Int): List<Verse> {
-        val notes = HashMap<VerseId, MutableList<String>>()
+        val notes = HashMap<VerseId, MutableList<Footnote>>()
         db.rawQuery(
             // A bound argument arrives as text, and SQLite will not equate text with the
             // integer `verse/1000`; compare against a range of ids instead.
-            "SELECT f.verse, f.text FROM footnotes f WHERE f.verse >= ? AND f.verse < ?" +
-                " ORDER BY f.verse, f.idx",
+            "SELECT f.verse, f.text, f.w_start, f.w_end FROM footnotes f" +
+                " WHERE f.verse >= ? AND f.verse < ? ORDER BY f.verse, f.idx",
             arrayOf(
                 (verseId(book, chapter, 0)).toString(),
                 (verseId(book, chapter + 1, 0)).toString(),
             )
         ).use { c ->
             while (c.moveToNext())
-                notes.getOrPut(c.getInt(0)) { mutableListOf() }.add(c.getString(1))
+                notes.getOrPut(c.getInt(0)) { mutableListOf() }
+                    .add(Footnote(c.getString(1), c.getInt(2), c.getInt(3)))
         }
         return db.rawQuery(
             "SELECT id,text,heading,subheading,psalm_title,xref_note FROM verses" +
@@ -166,26 +188,36 @@ class Bible private constructor(private val db: SQLiteDatabase) {
     }
 
     /**
-     * Commentary for a whole chapter at once, by verse.
+     * Commentary for a whole chapter at once, one entry per paragraph, with the verses it
+     * covers on this page.
      *
      * Study mode shows commentary against every verse on screen, and Psalm 119 is 176 of
      * them: asking per verse would be 176 round trips on the scroll thread. One range query
-     * instead, run off the main thread by the caller.
+     * instead, run off the main thread by the caller. The table links a paragraph to each
+     * verse of its range; those links are folded back into one span here, so Henry on
+     * Romans 8:1–9 comes back once, as 1–9, rather than nine times. In the order the
+     * commentaries read: plainest first.
      */
-    fun commentaryFor(book: Int, chapter: Int): Map<VerseId, List<Commentary>> {
-        if (!hasCommentary) return emptyMap()
-        return db.rawQuery(
-            "SELECT c.verse, c.source, t.body FROM comm.comm c JOIN comm.comm_text t" +
+    fun commentaryFor(book: Int, chapter: Int): List<CommentSpan> {
+        if (!hasCommentary) return emptyList()
+        // Keyed by paragraph (source and text id), in order of first appearance, so a
+        // paragraph's span is the first to the last verse the table links it to.
+        val spans = LinkedHashMap<Pair<String, Int>, CommentSpan>()
+        db.rawQuery(
+            "SELECT c.verse, c.source, c.text_id, t.body FROM comm.comm c JOIN comm.comm_text t" +
                 " ON t.id=c.text_id WHERE c.verse >= ? AND c.verse < ?" +
                 " ORDER BY c.verse, $COMM_ORDER",
             arrayOf(verseId(book, chapter, 0).toString(), verseId(book, chapter + 1, 0).toString())
         ).use { cur ->
-            buildMap<VerseId, MutableList<Commentary>> {
-                while (cur.moveToNext())
-                    getOrPut(cur.getInt(0)) { mutableListOf() } +=
-                        Commentary(cur.getString(1), cur.getString(2))
+            while (cur.moveToNext()) {
+                val verse = cur.getInt(0)
+                val key = cur.getString(1) to cur.getInt(2)
+                val had = spans[key]
+                spans[key] = had?.copy(end = maxOf(had.end, verse))
+                    ?: CommentSpan(key.first, cur.getString(3), verse, verse)
             }
         }
+        return spans.values.toList()
     }
 
     /**
@@ -353,7 +385,7 @@ class Bible private constructor(private val db: SQLiteDatabase) {
          * and AssetManager decompresses it as it is read, so this is a plain copy.
          */
         /** Bump in build.py's TEXT_VERSION whenever the verse text itself changes. */
-        const val TEXT_VERSION = 3
+        const val TEXT_VERSION = 4
 
         fun open(ctx: Context): Bible {
             val core = File(ctx.filesDir, ASSET)

@@ -57,6 +57,41 @@ import androidx.compose.ui.unit.sp
 /** How far study material is inset from the verse text. */
 private val INDENT = 15.dp
 
+/** The commentary lane of the margin: thinner and quieter than a note's. */
+fun commentLaneColour(p: Palette): Color = p.gold.copy(alpha = if (p.dark) 0.55f else 0.5f)
+
+/** The letter that marks a translator's note in the verse and on the note: a, b, c. */
+fun noteLetter(index: Int): String = ('a' + (index % 26)).toString()
+
+/**
+ * The margin beside a row: whatever spans pass through it, drawn down its full height.
+ *
+ * A note's bracket is 3dp in the mark's colour; commentary's is a hairline in gold, drawn
+ * underneath so a note's covers it where the two coincide. The row that ends a span draws
+ * its own last stretch (see [NoteRow], [CommentRow]), stopping at the foot of the writing
+ * rather than running on through the gap below it.
+ */
+@Composable
+fun MarginLanes(margin: Margin, content: @Composable () -> Unit) {
+    val p = LocalPalette.current
+    val note = margin.note?.color(p.dark)?.let { if (p.dark) it.copy(alpha = 0.75f) else it }
+    val comment = if (margin.comment) commentLaneColour(p) else null
+    Box(
+        Modifier.fillMaxWidth().then(
+            if (note == null && comment == null) Modifier else Modifier.drawBehind {
+                comment?.let {
+                    drawRect(it, androidx.compose.ui.geometry.Offset.Zero,
+                        androidx.compose.ui.geometry.Size(1.5.dp.toPx(), size.height))
+                }
+                note?.let {
+                    drawRect(it, androidx.compose.ui.geometry.Offset.Zero,
+                        androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height))
+                }
+            }
+        )
+    ) { content() }
+}
+
 /**
  * The reader's own note.
  *
@@ -118,24 +153,37 @@ fun NoteRow(text: String, colour: MarkColor, scope: String? = null, onTap: () ->
  *
  * This is the apparatus a printed study Bible sets at the foot of the page: it is about the
  * text itself — a variant, a literal rendering, a measure — so it is the most tightly bound
- * to the verse and the most compact thing here.
+ * to the verse and the most compact thing here. The letter is the one that marks the place
+ * in the verse, and the words it marks are quoted first, so "Or *a canopy*" is read against
+ * "expanse" without looking back up the page.
  */
 @Composable
-fun FootnoteRow(text: String) {
+fun FootnoteRow(letter: Int, phrase: String?, text: String) {
     val p = LocalPalette.current
+    val scale = LocalTextScale.current
+    val body = remember(phrase, text) {
+        buildAnnotatedString {
+            if (phrase != null) {
+                withStyle(SpanStyle(color = p.ink, fontWeight = FontWeight.Medium)) { append(phrase) }
+                append("  ")
+            }
+            append(italicised(text))
+        }
+    }
     Row(Modifier.padding(start = INDENT, end = 4.dp, bottom = 14.dp)) {
         androidx.compose.material3.Text(
-            "†",
+            noteLetter(letter),
             fontFamily = UiFont,
-            fontSize = (11 * LocalTextScale.current).sp,
+            fontSize = (11 * scale).sp,
+            fontWeight = FontWeight.SemiBold,
             color = p.indigo,
-            modifier = Modifier.padding(end = 9.dp, top = 1.dp),
+            modifier = Modifier.width(14.dp).padding(top = 1.dp),
         )
         androidx.compose.material3.Text(
-            text,
+            body,
             fontFamily = UiFont,
-            fontSize = (12.5 * LocalTextScale.current).sp,
-            lineHeight = (20 * LocalTextScale.current).sp,
+            fontSize = (12.5 * scale).sp,
+            lineHeight = (20 * scale).sp,
             color = p.inkSoft,
         )
     }
@@ -161,8 +209,11 @@ fun commentaryBody(body: String): String =
  * literal asterisks — they have to become real style runs. Henry and JFB carry none, so
  * they pass through untouched.
  */
-fun commentaryText(body: String): androidx.compose.ui.text.AnnotatedString {
-    val clean = commentaryBody(body)
+fun commentaryText(body: String): androidx.compose.ui.text.AnnotatedString =
+    italicised(commentaryBody(body))
+
+/** Text with `*asterisked*` runs set in italic: the translators' and Tyndale's quotations. */
+fun italicised(clean: String): androidx.compose.ui.text.AnnotatedString {
     if (!clean.contains('*')) return androidx.compose.ui.text.AnnotatedString(clean)
     return androidx.compose.ui.text.buildAnnotatedString {
         var i = 0
@@ -215,6 +266,8 @@ fun CommentRow(
     books: List<Book>,
     /** Follow a scripture cited in the text. */
     onGo: (VerseId) -> Unit,
+    /** How far the paragraph reaches ("verses 1–9") when that is more than one verse. */
+    scope: String? = null,
     onSpeak: (() -> Unit)? = null,
 ) {
     val p = LocalPalette.current
@@ -224,20 +277,33 @@ fun CommentRow(
     val text = remember(body, verse) {
         Citations.linked(commentaryText(body), verse, books, p.indigo, onGo)
     }
+    val gap = 18.dp
+    val lane = commentLaneColour(p)
     Row(
         Modifier
-            .padding(start = INDENT, bottom = 18.dp)
             .fillMaxWidth()
+            .then(
+                // A paragraph on a run of verses closes the bracket that began at the
+                // first of them: the last stretch runs to the foot of the paragraph. One
+                // on a single verse sits right under it and needs no line to say so.
+                if (scope != null) Modifier.drawBehind {
+                    drawRect(lane, androidx.compose.ui.geometry.Offset.Zero,
+                        androidx.compose.ui.geometry.Size(1.5.dp.toPx(), size.height - gap.toPx()))
+                } else Modifier
+            )
+            .padding(start = INDENT, bottom = gap)
             .clickable(
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() },
             ) { open = !open },
     ) {
-        // No bar here: commentary is the bulkiest thing on the page, and a marker against
-        // every verse would turn the margin into a ladder. The gold label is enough.
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Label(commentaryName(source), p.gold)
+                Label(
+                    if (scope == null) commentaryName(source)
+                    else commentaryName(source) + " \u00b7 " + scope,
+                    p.gold,
+                )
                 Spacer(Modifier.weight(1f))
                 if (onSpeak != null && open) {
                     androidx.compose.material3.Text(

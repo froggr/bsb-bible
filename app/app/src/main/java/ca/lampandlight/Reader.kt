@@ -62,8 +62,11 @@ fun Reader(
     onSearch: () -> Unit,
     onMenu: () -> Unit,
     selection: Set<VerseId>,
-    onSelect: (VerseId) -> Unit,
-    onBookmark: (VerseId) -> Unit,
+    /**
+     * A verse number was tapped: select the verse, or with one already selected, make the
+     * two the ends of a range. The colour and the note are then offered on the span.
+     */
+    onPickVerse: (VerseId) -> Unit,
     onOpenVerse: (VerseId, Int) -> Unit,
     /** Open the note written across a span, to read it in full or change it. */
     onOpenNote: (VerseId, VerseId) -> Unit,
@@ -227,7 +230,8 @@ fun Reader(
             ),
         ) {
             items(state.rows, key = { it.key }) { row ->
-                when (row) {
+                // Every row draws the brackets passing it; see Margin.
+                MarginLanes(row.margin) { when (row) {
                     is Row.Heading -> SectionHeading(row.text)
                     is Row.Title -> PsalmTitle(row.text)
                     is Row.Verse -> VerseBlock(
@@ -236,20 +240,20 @@ fun Reader(
                         reading = narrator.verseIndex == row.index,
                         mark = state.markOf(row.verse.id),
                         markedWords = state.markedWords(row.verse.id, row.words.size)?.first,
-                        noteBar = state.noteBarOf(row.verse.id),
                         // The selection is a range: its two ends, and everything between.
                         selected = dragSpan?.let { (a, b) ->
                             row.verse.id >= minOf(a, b) && row.verse.id <= maxOf(a, b)
                         } ?: (selection.isNotEmpty() &&
                             row.verse.id >= selection.min() && row.verse.id <= selection.max()),
                         selecting = selection.isNotEmpty() || dragSpan != null,
-                        // Tapping the number keeps the verse straight away. The sheet, on a
-                        // long press, is where the colour and the note live.
-                        onTapVerse = { onBookmark(row.verse.id) },
+                        // Tapping the number selects the verse; a second number makes a
+                        // range. The colour row and Note then sit at the foot of the screen.
+                        // The sheet, on a long press, has the rest.
+                        onTapVerse = { chromeVisible = true; onPickVerse(row.verse.id) },
                         onTapWord = { w ->
                             chromeVisible = true
                             if (selection.isEmpty()) onOpenStudy(row.verse.id, w)
-                            else onSelect(row.verse.id)
+                            else onPickVerse(row.verse.id)
                         },
                         onLongPress = { onOpenVerse(row.verse.id, row.index) },
                         onReadFrom = { chromeVisible = true; onReadFrom(row.index) },
@@ -269,13 +273,17 @@ fun Reader(
                         scope = if (row.start != row.verse)
                             "verses ${row.start.verse}\u2013${row.verse.verse}" else null,
                     ) { onOpenNote(row.start, row.verse) }
-                    is Row.Footnote -> FootnoteRow(row.text)
+                    is Row.Footnote -> FootnoteRow(row.letter, row.phrase, row.text)
+                    // Drawn once under the last verse it covers, labelled with the span
+                    // and bracketed from its first verse, the same way as a note.
                     is Row.Comment -> CommentRow(
                         row.source, row.body, row.verse, bible.books,
                         onGo = { target ->
                             narrator.stop()
                             state.go(target.book, target.chapter, at = target.verse)
                         },
+                        scope = if (row.start != row.verse)
+                            "verses ${row.start.verse}\u2013${row.verse.verse}" else null,
                     )
                     is Row.Refs -> RefsRow(
                         row.refs.map { r ->
@@ -293,7 +301,7 @@ fun Reader(
                             state.go(target.book, target.chapter, at = target.verse)
                         },
                     )
-                }
+                } }
             }
             item("end") { Spacer(Modifier.height(40.dp)) }
         }
@@ -412,8 +420,6 @@ private fun VerseBlock(
     mark: MarkColor?,
     /** Which words of this verse the mark covers, when it does not cover all of them. */
     markedWords: IntRange?,
-    /** The colour of the note bracket down the margin, when the verse is written on. */
-    noteBar: MarkColor?,
     selected: Boolean,
     selecting: Boolean,
     onTapVerse: () -> Unit,
@@ -435,6 +441,15 @@ private fun VerseBlock(
     val partialMark = markedWords != null &&
         (markedWords.first > 0 || markedWords.last < row.words.lastIndex)
 
+    // The translators' notes, when they are on the page: which words each is about. The
+    // place is shown the way a printed Bible shows it — a small letter after the words —
+    // and the words themselves are underlined, dotted, so the note can be read against
+    // exactly what it annotates. The character ranges are kept for the underline.
+    val anchors = row.noteAnchors
+    val endsAt = HashMap<Int, MutableList<Int>>()        // word index -> notes ending there
+    anchors.forEachIndexed { k, r -> if (r != null) endsAt.getOrPut(r.last) { mutableListOf() } += k }
+    val underlines = ArrayList<IntRange>()
+
     val body = buildAnnotatedString {
         pushStringAnnotation("num", "1")
         withStyle(SpanStyle(
@@ -452,9 +467,11 @@ private fun VerseBlock(
         val litColour = p.gold.copy(alpha = if (p.dark) 0.22f else 0.17f)
         val marked = mark?.color(p.dark)?.copy(alpha = if (p.dark) 0.5f else 0.75f)
 
+        val starts = IntArray(anchors.size) { -1 }
         row.words.forEachIndexed { i, w ->
             val lit = narratingSpan?.contains(i) == true
             val inMark = partial && markedWords != null && i in markedWords
+            anchors.forEachIndexed { k, r -> if (r != null && r.first == i) starts[k] = length }
             pushStringAnnotation("w", i.toString())
             withStyle(SpanStyle(
                 background = when {
@@ -464,6 +481,18 @@ private fun VerseBlock(
                 },
                 color = p.ink,
             )) { append(w) }
+            endsAt[i]?.forEach { k ->
+                // The line stops at the last letter: "Jesus" is annotated, its full stop
+                // is not.
+                val tail = w.length - w.trimEnd { !it.isLetterOrDigit() }.length
+                if (starts[k] >= 0 && length - tail > starts[k]) underlines += starts[k] until length - tail
+                // The letter sits with the word it follows, so a tap on it is a tap on
+                // the word, and a line never breaks between the two.
+                withStyle(SpanStyle(
+                    color = p.indigo, fontSize = 10.5.sp * scale, fontFamily = UiFont,
+                    fontWeight = FontWeight.SemiBold, baselineShift = BaselineShift(0.45f),
+                )) { append(noteLetter(k)) }
+            }
             pop()
             // The space between two marked words is marked too, so the band is unbroken.
             if (i < row.words.lastIndex) {
@@ -481,24 +510,11 @@ private fun VerseBlock(
 
     // The padding is constant and the background only fades in: adding padding when a verse
     // starts being read reflowed every verse below it, which is what made the page shift.
-    // The bracket of a note runs down the margin in the mark's colour, through the gap
-    // below this verse and on — through the next verse of the span, and finally the note
-    // itself — as one unbroken line, the way a comment in a word processor brackets the
-    // whole passage it is about. So it is drawn BEFORE the bottom padding is taken off,
-    // and it reaches the full height.
-    val bracket = noteBar?.color(p.dark)?.let { if (p.dark) it.copy(alpha = 0.75f) else it }
+    // The bracket of a note down the margin is not drawn here: the row is wrapped in
+    // MarginLanes, which draws every bracket passing this verse through its full height.
     Box(
         Modifier
             .fillMaxWidth()
-            .then(
-                if (bracket != null) Modifier.drawBehind {
-                    drawRect(
-                        color = bracket,
-                        topLeft = androidx.compose.ui.geometry.Offset(0f, 0f),
-                        size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height),
-                    )
-                } else Modifier
-            )
             .padding(bottom = 9.dp)
             .background(
                 when {
@@ -536,6 +552,32 @@ private fun VerseBlock(
             onTextLayout = { layout = it },
             modifier = Modifier
                 .onGloballyPositioned { layoutTop = it.positionInWindow().y }
+                // The dotted line under the words a translator's note is about. Drawn
+                // from the laid-out text, line by line, so a phrase that wraps is
+                // underlined on both lines.
+                .drawBehind {
+                    val l = layout
+                    if (l == null || underlines.isEmpty()) return@drawBehind
+                    val dots = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                        floatArrayOf(1.5.dp.toPx(), 2.5.dp.toPx()))
+                    val width = 1.dp.toPx()
+                    val colour = p.indigo.copy(alpha = if (p.dark) 0.8f else 0.7f)
+                    underlines.forEach { chars ->
+                        val from = l.getLineForOffset(chars.first)
+                        val to = l.getLineForOffset(chars.last)
+                        for (line in from..to) {
+                            val a = maxOf(chars.first, l.getLineStart(line))
+                            val b = minOf(chars.last, l.getLineEnd(line, visibleEnd = true) - 1)
+                            if (b < a) continue
+                            val x0 = l.getBoundingBox(a).left
+                            val x1 = l.getBoundingBox(b).right
+                            val y = l.getLineBaseline(line) + 2.5.dp.toPx()
+                            drawLine(colour, androidx.compose.ui.geometry.Offset(x0, y),
+                                androidx.compose.ui.geometry.Offset(x1, y), width,
+                                pathEffect = dots)
+                        }
+                    }
+                }
                 // ONE gesture loop for everything this verse does: tap, double tap, long
                 // press, and long-press-then-drag.
                 //

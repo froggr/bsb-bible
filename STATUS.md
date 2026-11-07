@@ -1,6 +1,6 @@
 # Status
 
-Last updated 2026-11-06, release **0.38**.
+Last updated 2026-11-07, **0.39** built, not yet released.
 
 Install / share: <https://github.com/froggr/bsb-bible/releases/latest>
 
@@ -26,6 +26,9 @@ Install / share: <https://github.com/froggr/bsb-bible/releases/latest>
 | Commentary in modern English | Tyndale Open Study Notes (2022) built in: 16,729 notes over 28,851 of 31,086 verses, all 66 books. Shipped in 0.32 |
 | Per-commentary switches | Verified on the emulator in 0.33: the three switches render under *Commentary*, Henry and JFB off leaves only Tyndale on the page, and the choice survives a reinstall. Reachable from Settings → *What shows under each verse*, not only by long-pressing Study |
 | Updating a data layer | Verified: the commentary row offers **Update** when already installed, and the 39 MB layer with Tyndale replaced the old one |
+| Tap a number, tap another: a range | Verified on the emulator 2026-11-07: tapping 10 selects it (bar says "1 verse"), tapping 11 makes 10–11 ("2 verses"), Note on that writes one note labelled "verses 10–11". The anchor is held explicitly, so a third tap moves the far end. Not covered: hardware, tapping the lone selected verse to let it go (code path only), the drag (unchanged, still untested) |
+| Commentary on a range shows once | Verified on the emulator 2026-11-07, Romans 8 with all three commentaries on: JFB on 10–11 draws once under 11 as "Jamieson, Fausset & Brown · verses 10–11" with a hairline bracket from 10; Henry's 1–9 runs unbroken past footnotes, JFB rows and verse 7–8; a note bracket on 10–11 draws over the commentary lane and the lane carries on below the note. Not covered: dark theme, Tyndale ranges that cross a chapter (the span is clamped to the page) |
+| Translator's notes anchored to their words | Verified on the emulator 2026-11-07: "Jesus" in Rom 8:1 carries a superscript *a* and a dotted underline ending before the full stop; the note under the verse reads "a Jesus  BYZ and TR *in Christ Jesus…*" with the italics kept. Study off: the verse is clean. Not covered: a phrase that wraps across two lines (drawn per line, not seen), narration over a verse with markers |
 
 ## Known broken / unfinished
 
@@ -33,9 +36,6 @@ Install / share: <https://github.com/froggr/bsb-bible/releases/latest>
   three failed attempts. Taps and the verse menu are verified; **the drag itself has never been
   tested on hardware** because adb cannot synthesise a long-press-then-drag. Unknown whether it
   works.
-- **Tap-to-extend anchors on the wrong end.** `MainActivity.onBookmark` takes its anchor from
-  `selection.first()` on an *unordered* `Set`, so after a drag a third tap can pivot from the
-  wrong verse. Found, not fixed.
 - **`playerPx` uses a high-water mark** (`if (it.height > playerPx)`), the same bug that caused
   the selection drift via `topBarPx`. Left alone deliberately: the player's voice panel genuinely
   changes height, it only affects bottom padding, and shrinking it would jump the page.

@@ -152,6 +152,10 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
     /** The span being dragged out, while the finger is still down. */
     var dragging by remember { mutableStateOf<Pair<VerseId, VerseId>?>(null) }
     var selection by remember { mutableStateOf<Set<VerseId>>(emptySet()) }
+    // The verse the selection was started on. A range is this and the verse tapped last,
+    // so a third tap moves the far end and never pivots on the wrong one — reading the
+    // anchor back out of an unordered Set did exactly that.
+    var anchor by remember { mutableStateOf<VerseId?>(null) }
     // The span being written on: one verse, or a range. Not a bare id — a note taken on a
     // selection belongs to all of it.
     var noting by remember { mutableStateOf<Pair<VerseId, VerseId>?>(null) }
@@ -271,6 +275,7 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
                     undo = Triple(lo, before, before != null)
                     // Leave it selected, so the colour row and Note are one tap away for
                     // anyone who wants them — but the mark is already saved either way.
+                    anchor = lo
                     selection = setOf(lo, hi)
                 }
                 dragging = null
@@ -280,20 +285,17 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
             onSearch = { screen = "search" },
             onMenu = { screen = "menu" },
             selection = selection,
-            onSelect = { v ->
-                selection = if (v in selection) selection - v else selection + v
-            },
-            onBookmark = { v ->
-                if (selection.isNotEmpty()) {
-                    // Mid-selection, a tap moves the far end: long-press one verse, tap
-                    // another, and everything between the two is the range.
-                    val anchor = selection.first()
-                    selection = setOf(anchor) + v
-                } else {
-                    val before = state.markOf(v)
-                    val had = before != null
-                    state.toggle(v)
-                    undo = Triple(v, before, had)
+            // Tap a verse number and the verse is selected; tap another, further down the
+            // page or up it, and everything between the two is. Then the colour row and
+            // Note at the foot of the screen apply to the whole span, one verse or twenty.
+            // Nothing is saved until a colour is picked, and tapping the one selected
+            // verse again lets it go.
+            onPickVerse = { v ->
+                val from = anchor
+                when {
+                    selection.isEmpty() || from == null -> { anchor = v; selection = setOf(v) }
+                    selection == setOf(v) -> { anchor = null; selection = emptySet() }
+                    else -> selection = setOf(from, v)
                 }
             },
             onOpenVerse = { v, i ->
@@ -458,7 +460,7 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
                     bible.reference(verse), "$text\n\n\u2014 ${bible.reference(verse)} (BSB)"))
                 acting = null
             },
-            onSelectRange = { acting = null; selection = setOf(verse) },
+            onSelectRange = { acting = null; anchor = verse; selection = setOf(verse) },
             onDismiss = { acting = null },
         )
     }

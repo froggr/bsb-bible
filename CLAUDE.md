@@ -167,6 +167,12 @@ and is stale.
 
 ## Data
 
+**`app/app/src/main/assets/bible-reading.db` is a hand copy of `data/bible-reading.db`.**
+Nothing copies it for you; after `build.py`, `cp` it, and bump `TEXT_VERSION` in BOTH
+`data/build.py` and `Bible.kt` whenever the reading schema or text changes — the phone only
+replaces its unpacked copy when the stamp goes up (0.39 added `footnotes.w_start/w_end`; an
+old copy would fail the query).
+
 `data/build.py` rebuilds everything from `data/src/`. It writes `data/bible.db` and splits it
 into the reading / study / commentary layers, so run it with no argument — passing an output
 path writes only the monolith and leaves the shipped layers untouched.
