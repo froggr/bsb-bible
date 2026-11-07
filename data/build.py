@@ -6,7 +6,7 @@
 Reads from src/:
   tables.tsv            BSB translation tables (word-level Hebrew/Greek, Strong's, headings)
   cross_references.txt  OpenBible.info, CC-BY
-  x_MHC/, x_JFB/        SWORD commentary modules, public domain
+  x_MHC/, x_JFB/, x_WES/ SWORD commentary modules, public domain
 
 Design notes:
   - `verses` holds the assembled reading text, so drawing a chapter is one query.
@@ -432,6 +432,30 @@ def clean_mhc(s):
     return s.strip()
 
 
+# Wesley's lemma: the words of the verse he is glossing, then " - ", then the gloss.
+# "Wounded - Which word comprehends all his pains". The lemma starts a sentence (or the
+# entry) with a capital and the gloss starts with a capital too; a lower-case word either
+# side of the dash is one of his spaced hyphens ("mercy - seat", "first - born").
+WES_LEMMA = re.compile(
+    r"(?:(?<=^)|(?<=[.?!;:] )|(?<=[.?!;:] \d\. ))"
+    r"([A-Z][^.?!;:*]{0,80}?(?:, &c\.)?) - (?=[A-Z\"'(])")
+
+
+def clean_wes(raw):
+    """John Wesley's Notes, from ThML: plain text with the lemma in *italics*."""
+    s = re.sub(r"<scripRef[^>]*>(.*?)</scripRef>", r"\1", raw, flags=re.S)
+    s = re.sub(r"<br\s*/?>(\s*<br\s*/?>)*", "\n", s)
+    s = re.sub(r"<[^>]+>", " ", s)
+    s = html.unescape(s.replace("&c;", "&c.")).replace("\xa0", " ")
+    s = re.sub(r"[ \t]+", " ", s)
+    s = re.sub(r" *\n *", "\n", s).strip()
+    # "grand - children", "well - pleased", "Tit 1:6 - 9": his typesetter's spaced hyphens.
+    s = re.sub(r"(?<=[a-z]) - (?=[a-z])", "-", s)
+    s = re.sub(r"(?<=\d) - (?=\d)", "-", s)
+    s = WES_LEMMA.sub(lambda m: f"*{m.group(1).strip()}* — ", s)
+    return s.strip()
+
+
 # Tyndale Open Study Notes: modern-English study notes, CC BY-SA 4.0.
 # Henry (1710) and JFB (1871) explain the text in the prose of their own century;
 # these explain it in ours. Kept as a third source, not a replacement: Tyndale is
@@ -543,23 +567,29 @@ def load_tyndale(db):
 def load_commentary(db):
     sys.path.insert(0, str(HERE))
     import sword
+    # Henry and JFB are OSIS, with chapter milestones in the text; Wesley is ThML with
+    # none, so its slots are labelled from the KJV versification instead.
     sources = [
-        ("jfb", SRC / "x_JFB/modules/comments/zcom/jfb", clean_jfb),
-        ("mhc", SRC / "x_MHC/modules/comments/zcom4/mhc", clean_mhc),
+        # (key, module, cleaner, reader, shortest body worth keeping). Wesley glosses a word
+        # in a few words — "Made - Have composed." — where Henry and JFB write paragraphs,
+        # and a stub under 40 characters from either of those is a heading, not a note.
+        ("jfb", SRC / "x_JFB/modules/comments/zcom/jfb", clean_jfb, "read", 40),
+        ("mhc", SRC / "x_MHC/modules/comments/zcom4/mhc", clean_mhc, "read", 40),
+        ("wes", SRC / "x_WES/modules/comments/zcom/wesley", clean_wes, "read_positional", 8),
     ]
     bodies = {}; links = []
-    for name, path, fn in sources:
+    for name, path, fn, how, shortest in sources:
         if not path.exists(): continue
         mod = sword.ZCom(str(path), sword.detect(str(path)))
         for t in ("ot", "nt"):
             if not (path / f"{t}.bzv").exists(): continue
-            for osis_ref, raw in mod.read(t):
+            for osis_ref, raw in getattr(mod, how)(t):
                 m = re.match(r"^([A-Za-z0-9]+)\.(\d+)\.(\d+)$", osis_ref)
                 if not m: continue
                 book = OSIS.get(m.group(1))
                 if not book: continue
                 body = fn(raw)
-                if len(body) < 40: continue
+                if len(body) < shortest: continue
                 key = hashlib.md5(body.encode()).hexdigest()
                 tid = bodies.setdefault(key, (len(bodies) + 1, body))[0]
                 links.append((vid(book, int(m.group(2)), int(m.group(3))), name, tid))
@@ -645,7 +675,7 @@ def split(full):
 
     reading   ships in the APK: every verse, headings, footnotes, search
     study     words with Hebrew/Greek and Strong's, plus cross-references
-    commentary Matthew Henry and JFB
+    commentary Tyndale, Wesley, Matthew Henry and JFB
 
     The two downloads are ATTACHed when present; nothing in the reader needs them."""
     import shutil

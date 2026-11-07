@@ -54,7 +54,7 @@ The app works fully offline on first install. From Settings you can add:
 
 - the **voice** for reading aloud (about 60 MB, plus about 4 MB for the fourteen voices)
 - **study material** — Strong's numbers, cross-references (about 20 MB)
-- **commentary** (about 11 MB)
+- **commentary** (about 15 MB)
 - **music beds** — eight instrumental tracks (about 12 MB)
 
 ## Why it is not on the Play Store
@@ -87,13 +87,13 @@ known broken.
 | `app/` | The Android app (Kotlin + Phonon). `./gradlew assembleDebug` |
 | `proto/` | Design prototype: the reading/listening/study experience as a web page |
 | `proto/extract.py` | Parses the BSB translation table into verses with word-level data |
-| `proto/sword.py` | Reads SWORD `zCom`/`zCom4` commentary modules |
+| `data/sword.py` | Reads SWORD `zCom`/`zCom4` commentary modules, with or without chapter milestones |
 | `vendor/xn-ptts/` | Phonon TTS (Gradium), built for Android by `android/build.sh` |
 | `data/build.py` | Builds `bible.db` and splits it into core + commentary |
 | `data/bible-reading.db` | 8.8 MB: verse text, footnotes, marks, search. **This is what ships in the APK** |
 | `data/bible-core.db` | 77 MB: text plus the word layer and cross-references. Build input, not shipped |
 | `data/bible-study.db` | 68 MB: Strong's and cross-references. Downloaded on request (20 MB gzipped) |
-| `data/bible-commentary.db` | 39 MB: Tyndale + Matthew Henry + JFB. Downloaded on request (13 MB gzipped) |
+| `data/bible-commentary.db` | 45 MB: Tyndale + Wesley + Matthew Henry + JFB. Downloaded on request (15 MB gzipped) |
 | `data/beds/` | The music beds that SHIP. Not a source directory — see below |
 | `data/beds/_withvocals/` | Untouched originals for stillness, psalter, evening |
 | `public/beds/` | Untouched originals for morning, shepherd, vigil, upper-room, wilderness |
@@ -141,10 +141,11 @@ Everything is public domain or CC-BY, and all of it is verified as downloading.
 | `a.openbible.info/data/cross-references.zip` | 8.3 MB | 344,800 cross-references ranked by vote |
 | `crosswire.org/ftpmirror/pub/sword/packages/rawzip/MHC.zip` | 15 MB | Matthew Henry (1710), whole Bible |
 | `…/rawzip/JFB.zip` | 6.3 MB | Jamieson-Fausset-Brown (1871), whole Bible |
+| `…/rawzip/Wesley.zip` | 1.9 MB | John Wesley's Explanatory Notes (1755), whole Bible |
 | `tyndaleopenresources.com/…/tyndale_open-studynotes.zip` | 2.9 MB | Tyndale Open Study Notes (2022), whole Bible |
 
 BSB text is CC0. Cross-references need the line
-`Cross-references from OpenBible.info, CC-BY`. Henry and JFB declare
+`Cross-references from OpenBible.info, CC-BY`. Henry, JFB and Wesley declare
 `DistributionLicense=Public Domain` in their own module config.
 
 **Tyndale is CC BY-SA 4.0, not public domain** — the only source here with a condition
@@ -154,11 +155,28 @@ tyndaleopenresources.com.` Modify the notes and the licence also wants the chang
 the wording "Adapted from Tyndale Open Study Notes…" — see `data/src/x_TYN/_README.txt`,
 which ships with the download. Keep that file.
 
-Why a third commentary at all: Henry and JFB explain the text in the prose of their own
+Why more than one commentary: Henry and JFB explain the text in the prose of their own
 centuries — Roman-numeral verse references, nested `I. / 1. / (1.)` outlines, providence as
 "physic works upon the body". Tyndale is the open release of the NLT Study Bible apparatus and
-explains the same verse in today's English, so it reads first. All three are kept, because
-Tyndale is silent where the older two are not — Romans 8:28 has no Tyndale note.
+explains the same verse in today's English, so it reads first. All are kept, because
+Tyndale is silent where the older ones are not — Romans 8:28 has no Tyndale note.
+
+Wesley (added in 0.40, at Joe's asking for something in the Spirit-filled stream that is
+actually free) is the odd one out in shape: not paragraphs but a gloss on each phrase,
+"*Wounded* — Which word comprehends all his pains and punishments." The build sets the
+lemma in italics. Two things about his module:
+
+- It is ThML with **no chapter milestones**, so `sword.read()` finds nothing in it; the
+  slots are labelled from the KJV versification instead (`sword.read_positional()`, two
+  heading slots then book and chapter headings, exactly as SWORD lays it out).
+- Its old `zCom` index is 10-byte records `<IIH` (block, offset, size) — `sword.py` had the
+  field order wrong and decoded only the first entry of each block. Henry and JFB are
+  `zCom4` and were never affected.
+- Many slots **link** to an earlier entry's bytes. In SWORD that means "same note", but here
+  it is mostly filler — the first verse of a chapter pointing at the previous chapter's last
+  note, 1 Thess 3:2–12 all at the note on 3:1 — so every repeat is dropped and a note sits
+  under the first verse it is on. The cost is that the few genuine ranges (Gen 1:9–13) lose
+  their bracket.
 
 Notes on the data, learned the hard way:
 
@@ -333,7 +351,7 @@ in 1 s.
 | words | 441,123 with original, transliteration, Strong's, parsing |
 | footnotes | 4,854 |
 | cross-references | 344,799, vote-ranked |
-| commentary | 20,726 passages → 54,926 verse links, covering 31,040 verses |
+| commentary | 54,142 passages → 100,480 verse links, covering 31,116 verses (Wesley: 16,687 notes on 16,703 verses) |
 
 Verse ids are `book*1_000_000 + chapter*1_000 + verse`, so they sort in reading order and a
 chapter is one range scan.

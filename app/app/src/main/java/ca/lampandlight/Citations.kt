@@ -10,11 +10,12 @@ import androidx.compose.ui.text.buildAnnotatedString
 /**
  * Scripture cited inside commentary, made into links.
  *
- * The three commentaries cite in three hands. Tyndale: `Exod 28:41-43; 29:9`, `1 Sam
+ * The commentaries cite in different hands. Tyndale: `Exod 28:41-43; 29:9`, `1 Sam
  * 17:12-58`, and a bare `1:3–2:3` meaning this book. Henry: `Lam. iv. 10` with the chapter
  * in roman numerals, `ch. xii. 3`, and `v. 57` meaning this chapter. Jamieson-Fausset-Brown:
- * `Lu 13:6`, `Ge 3:1-5`, `Is 5:2`, in the shortest abbreviations anyone has used. All of them
- * run continuations off one book name with semicolons.
+ * `Lu 13:6`, `Ge 3:1-5`, `Is 5:2`, in the shortest abbreviations anyone has used. Wesley:
+ * `Ge 5:4`, `Tit 1:6-9`, `chap.25:8`, much as JFB. All of them run continuations off one
+ * book name with semicolons.
  *
  * A citation is recognised by shape — a capitalised word (or `ch.`/`v.`), a chapter, a
  * verse — and then the book is resolved through [Reference], the same parser the search box

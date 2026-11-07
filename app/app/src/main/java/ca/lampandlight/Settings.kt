@@ -321,8 +321,8 @@ fun SettingsScreen(
             }
             LayerRow(
                 "Commentary",
-                "Tyndale Study Notes (2022), plus Matthew Henry (1710) and " +
-                    "Jamieson, Fausset & Brown (1871).",
+                "Tyndale Study Notes (2022), John Wesley (1755), Matthew Henry (1710) " +
+                    "and Jamieson, Fausset & Brown (1871).",
                 present = layersPresent.second,
                 busy = busy == "comm", progress = progress,
             ) {
@@ -350,7 +350,7 @@ fun SettingsScreen(
                 )
                 Text(
                     "Pick the commentaries you want \u2014 Tyndale's modern English on its own, " +
-                        "or with Henry and JFB. Also cross-references and translator's notes.",
+                        "or with Wesley, Henry and JFB. Also cross-references and translator's notes.",
                     fontFamily = UiFont, fontSize = 11.sp, lineHeight = 18.sp, color = p.inkSoft,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -380,8 +380,8 @@ fun SettingsScreen(
             Text(
                 "Berean Standard Bible, dedicated to the public domain.\n" +
                     "Cross-references from OpenBible.info, CC-BY.\n" +
-                    "Matthew Henry and Jamieson, Fausset & Brown from CrossWire, " +
-                    "public domain.\n" +
+                    "John Wesley's Notes, Matthew Henry and Jamieson, Fausset & Brown " +
+                    "from CrossWire, public domain.\n" +
                     "Tyndale Open Study Notes \u00a9 2022 Tyndale House Publishers, " +
                     "CC BY-SA 4.0, available free at tyndaleopenresources.com.\n" +
                     "Speech by Phonon (Gradium), Apache 2.0, generated on this phone.",

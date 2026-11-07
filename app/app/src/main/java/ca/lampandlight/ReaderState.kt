@@ -65,7 +65,7 @@ sealed interface Row {
      *
      * The same shape as a note: [verse] is the last verse of the paragraph's span on this
      * page and [start] the first. A paragraph on one verse has the two equal.
-     * [source] is the short key: "tyn", "mhc", "jfb".
+     * [source] is the short key: "tyn", "wes", "mhc", "jfb".
      */
     data class Comment(
         val verse: VerseId,

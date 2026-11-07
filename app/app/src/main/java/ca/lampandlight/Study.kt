@@ -277,6 +277,7 @@ private fun CommentaryPane(comm: List<Commentary>) {
     val names = mapOf(
         "jfb" to ("Jamieson, Fausset & Brown" to "1871"),
         "mhc" to ("Matthew Henry" to "1710"),
+        "wes" to ("John Wesley" to "1755"),
         "tyn" to ("Tyndale Study Notes" to "2022"),
     )
     Column(Modifier.verticalScroll(rememberScrollState())) {

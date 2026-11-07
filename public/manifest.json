@@ -1,22 +1,22 @@
 {
- "generated": 1793971088,
+ "generated": 1794094949,
  "layers": {
   "bible-study.db": {
    "url": "/data/bible-study.db.gz",
    "bytes": 19831361,
-   "sha256": "9526544ca57f5c7ae7af78d9599b4c2ffc09e82da6ce601cb9a052ea4e0fc21d"
+   "sha256": "455d0cde591f0d70fb3f6807be9784a072b1f6a9de65ad5d2ed126a55b0b1032"
   },
   "bible-commentary.db": {
    "url": "/data/bible-commentary.db.gz",
-   "bytes": 12927414,
-   "sha256": "34ff81b0ce29c4a5af63449de75bfcfe221f0811383b6921317637d7d99cda4f"
+   "bytes": 15207119,
+   "sha256": "f3d1a444528eb19ad67f15e5a9d21ebed47754930998bad7bedb27b71e5743e2"
   }
  },
  "app": {
   "url": "/app.apk",
-  "bytes": 49418266,
-  "version": "0.31",
-  "sha256": "1ceb37491fdab41c7ca5918d19008aed0d4aee33b3bb910375c0eb11ff6ee70a"
+  "bytes": 33484805,
+  "version": "0.40",
+  "sha256": "9c6f1f0058042d798735f57abb9fb7b48287461083e9904440d4b1fe0c501028"
  },
  "beds": {
   "evening": {

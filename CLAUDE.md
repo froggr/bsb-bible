@@ -179,4 +179,11 @@ path writes only the monolith and leaves the shipped layers untouched.
 
 `data/src/` is gitignored (85 MB of BSB tables). Keep `data/src/x_TYN/_README.txt`: it is the
 licence text for the Tyndale notes, which are CC BY-SA 4.0 and need attribution, unlike the
-two public-domain commentaries.
+three public-domain commentaries.
+
+**The Wesley module (`x_WES`) has no chapter milestones and its slots link to stale
+entries.** `sword.read()` returns nothing for it — use `read_positional()`, which labels
+slots from the KJV table in `sword.py`. Verify any new module against known verses before
+trusting a count: Wesley decoded "plausibly" with the wrong record layout (`<HII` for `<IIH`)
+and with the slot table one off, and both looked like a working import until Psalm 23:1 came
+back as the note on Psalm 22:31. README has the detail under *The database*.

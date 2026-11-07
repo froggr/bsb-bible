@@ -206,8 +206,9 @@ fun commentaryBody(body: String): String =
  * Commentary with Tyndale's quoted scripture set in italic.
  *
  * The build marks those spans with `*asterisks*`, which a plain `Text` would draw as
- * literal asterisks — they have to become real style runs. Henry and JFB carry none, so
- * they pass through untouched.
+ * literal asterisks — they have to become real style runs. Wesley's lemma, the words of
+ * the verse he is glossing, is marked the same way. Henry and JFB carry none, so they pass
+ * through untouched.
  */
 fun commentaryText(body: String): androidx.compose.ui.text.AnnotatedString =
     italicised(commentaryBody(body))
@@ -236,6 +237,7 @@ fun italicised(clean: String): androidx.compose.ui.text.AnnotatedString {
  */
 private val COMMENTARIES = listOf(
     "tyn" to ("Tyndale Study Notes" to "2022 · plain modern English"),
+    "wes" to ("John Wesley" to "1755 · a line on each phrase"),
     "mhc" to ("Matthew Henry" to "1710 · devotional, discursive"),
     "jfb" to ("Jamieson, Fausset & Brown" to "1871 · close on the wording"),
 )
@@ -243,6 +245,7 @@ private val COMMENTARIES = listOf(
 /** What each commentary is actually called. The database keys are three letters. */
 fun commentaryName(source: String): String = when (source) {
     "mhc" -> "Matthew Henry"
+    "wes" -> "John Wesley"
     "jfb" -> "Jamieson, Fausset & Brown"
     "tyn" -> "Tyndale Study Notes"
     else -> source.uppercase()
@@ -438,9 +441,9 @@ fun StudyLayersSheet(
                 layers.commentary,
                 enabled = hasCommentary,
             ) { onChange(layers.copy(commentary = it)) }
-            // Which of them, indented under the switch that governs all three. Henry and
-            // JFB are worth having but read like their centuries; someone who only wants
-            // plain modern English can leave Tyndale on and the other two off.
+            // Which of them, indented under the switch that governs all four. Wesley, Henry
+            // and JFB are worth having but read like their centuries; someone who only wants
+            // plain modern English can leave Tyndale on and the others off.
             if (layers.commentary && hasCommentary) {
                 Column(Modifier.padding(start = 18.dp)) {
                     COMMENTARIES.forEach { (key, about) ->

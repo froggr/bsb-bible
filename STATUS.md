@@ -1,6 +1,6 @@
 # Status
 
-Last updated 2026-11-07, **0.39** built, not yet released.
+Last updated 2026-11-07, **0.40** released.
 
 Install / share: <https://github.com/froggr/bsb-bible/releases/latest>
 
@@ -28,6 +28,7 @@ Install / share: <https://github.com/froggr/bsb-bible/releases/latest>
 | Updating a data layer | Verified: the commentary row offers **Update** when already installed, and the 39 MB layer with Tyndale replaced the old one |
 | Tap a number, tap another: a range | Verified on the emulator 2026-11-07: tapping 10 selects it (bar says "1 verse"), tapping 11 makes 10–11 ("2 verses"), Note on that writes one note labelled "verses 10–11". The anchor is held explicitly, so a third tap moves the far end. Not covered: hardware, tapping the lone selected verse to let it go (code path only), the drag (unchanged, still untested) |
 | Commentary on a range shows once | Verified on the emulator 2026-11-07, Romans 8 with all three commentaries on: JFB on 10–11 draws once under 11 as "Jamieson, Fausset & Brown · verses 10–11" with a hairline bracket from 10; Henry's 1–9 runs unbroken past footnotes, JFB rows and verse 7–8; a note bracket on 10–11 draws over the commentary lane and the lane carries on below the note. Not covered: dark theme, Tyndale ranges that cross a chapter (the span is clamped to the page) |
+| John Wesley's Notes as a fourth commentary | Verified on the emulator 2026-11-07: Romans 8:1 in study mode shows "John Wesley" between Tyndale and JFB, the lemma in italics ("*There is therefore now no condemnation* — Either for things present or past"), and "Rom 7:7" in it is a link. The import was checked against Gen 1:1, Ps 23:2, Isa 53:5, Mal 4:6, Matt 1:1, John 3:16, Rom 8:28 and Rev 22:21 after two wrong decodes that looked right (see CLAUDE.md). Not covered: the switch on a phone, narration over Wesley's dashes, the 668 one-line glosses on the page, a verse where Wesley's note is only a parallel reference ("Luke 6:31.") |
 | Translator's notes anchored to their words | Verified on the emulator 2026-11-07: "Jesus" in Rom 8:1 carries a superscript *a* and a dotted underline ending before the full stop; the note under the verse reads "a Jesus  BYZ and TR *in Christ Jesus…*" with the italics kept. Study off: the verse is clean. Not covered: a phrase that wraps across two lines (drawn per line, not seen), narration over a verse with markers |
 
 ## Known broken / unfinished

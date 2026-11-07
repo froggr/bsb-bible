@@ -72,9 +72,11 @@ data class CommentSpan(val source: String, val body: String, val start: VerseId,
  * Reading order for the commentaries: plainest first.
  *
  * Not alphabetical. Tyndale (2022) explains the verse in today's English, so it is what
- * most readers want first; Henry and JFB are worth the work but are 1710 and 1871 prose.
+ * most readers want first. Wesley (1755) is a line or two on each phrase; Henry and JFB
+ * are worth the work but are 1710 and 1871 paragraphs.
  */
-private const val COMM_ORDER = "CASE c.source WHEN 'tyn' THEN 0 WHEN 'mhc' THEN 1 ELSE 2 END"
+private const val COMM_ORDER =
+    "CASE c.source WHEN 'tyn' THEN 0 WHEN 'wes' THEN 1 WHEN 'mhc' THEN 2 ELSE 3 END"
 
 data class Mark(
     val id: Long,
@@ -112,7 +114,7 @@ class Bible private constructor(private val db: SQLiteDatabase) {
     /** The word-level Hebrew/Greek and the cross-references: a download, not in the APK. */
     val hasStudy: Boolean get() = "study" in attached
 
-    /** Matthew Henry and JFB: a download. */
+    /** Tyndale, Wesley, Matthew Henry and JFB: a download. */
     val hasCommentary: Boolean get() = "comm" in attached
 
     /** Every verse of a chapter, in order, with footnotes attached. */
