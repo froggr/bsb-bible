@@ -99,6 +99,13 @@ CREATE TABLE comm_text (id INTEGER PRIMARY KEY, body TEXT NOT NULL);
 CREATE TABLE comm (
   verse INTEGER NOT NULL, source TEXT NOT NULL, text_id INTEGER NOT NULL,
   PRIMARY KEY (verse, source)) WITHOUT ROWID;
+-- Where the n-th *lemma* of a commentary paragraph falls in the BSB verse, as a display-word
+-- range, so the page can underline the words a commentator is glossing. Wesley quotes the
+-- King James; the words are carried across by Strong's number.
+CREATE TABLE comm_anchor (
+  verse INTEGER NOT NULL, text_id INTEGER NOT NULL, n INTEGER NOT NULL,
+  w_start INTEGER NOT NULL, w_end INTEGER NOT NULL,
+  PRIMARY KEY (verse, text_id, n)) WITHOUT ROWID;
 
 -- The user's own layer. Ranges are (start, end) verse ids with a word offset in each.
 CREATE TABLE marks (
@@ -315,6 +322,11 @@ def anchor(placed, slot, skip):
     return -1, -1
 
 
+# verse id -> (align() result, superscription slots skipped), kept from load_bible for
+# load_lemma_anchors, which needs to turn word slots into display words the same way.
+PLACED = {}
+
+
 def load_bible(db):
     nv = nw = nf = 0
     global nplaced
@@ -369,6 +381,7 @@ def load_bible(db):
               1 if is_placeholder(w["text"]) else 0) for p, w in enumerate(words)])
         nw += len(words)
         placed = align(words, body, skip)
+        PLACED[i] = (placed, skip)
         rows = []
         for k, (t, slot) in enumerate(meta["footnotes"]):
             ws, we = anchor(placed, slot, skip)
@@ -599,6 +612,128 @@ def load_commentary(db):
     return len(bodies), len(links)
 
 
+# ---------------------------------------------------------------- lemma anchors
+
+# Strong's numbers that mark grammar rather than a word, and would match half the verse:
+# the Greek article and the Hebrew object marker.
+GRAMMAR = {("G", 3588), ("H", 853)}
+
+
+def tokens(text):
+    return [t for t in re.split(r"[^a-z]+", text.lower()) if t]
+
+
+def read_kjv():
+    """{verse id: [(token, {(lang, strongs)})]} for the KJV with Strong's numbers.
+
+    Each <w> carries its Strong's numbers; the words the translators added (<transChange>)
+    carry none. Notes and psalm titles are dropped: Wesley glosses the verse, not the
+    apparatus.
+    """
+    import sword
+    base = SRC / "x_KJV/modules/texts/ztext/kjv"
+    if not base.exists(): return {}
+    mod = sword.ZCom(str(base), sword.detect(str(base)))
+    out = {}
+    for t in ("ot", "nt"):
+        for osis_ref, raw in mod.read_positional(t):
+            m = re.match(r"^([A-Za-z0-9]+)\.(\d+)\.(\d+)$", osis_ref)
+            book = OSIS.get(m.group(1)) if m else None
+            if not book: continue
+            raw = re.sub(r"<note[^>]*>.*?</note>", " ", raw, flags=re.S)
+            raw = re.sub(r"<title[^>]*>.*?</title>", " ", raw, flags=re.S)
+            toks = []
+            pos = 0
+            for w in re.finditer(r"<w ([^>]*?)(?:/>|>(.*?)</w>)", raw, flags=re.S):
+                for tk in tokens(re.sub(r"<[^>]+>", " ", raw[pos:w.start()])):
+                    toks.append((tk, set()))
+                nums = {(l, int(n)) for l, n in re.findall(r"strong:([HG])0*(\d+)", w.group(1))}
+                for tk in tokens(re.sub(r"<[^>]+>", " ", w.group(2) or "")):
+                    toks.append((tk, nums - GRAMMAR))
+                pos = w.end()
+            for tk in tokens(re.sub(r"<[^>]+>", " ", raw[pos:])):
+                toks.append((tk, set()))
+            out[vid(book, int(m.group(2)), int(m.group(3)))] = toks
+    return out
+
+
+def find_run(hay, needle, start):
+    """(first, last) of the longest run of [needle] tokens found contiguously in [hay],
+    searching from [start] first and from the top second; None below two tokens unless
+    the lemma is a single word."""
+    n = len(needle)
+    for size in range(n, 0, -1):
+        if size < 2 and n > 1: break
+        for off in range(0, n - size + 1):
+            piece = needle[off:off + size]
+            if size == 1 and len(piece[0]) < 3: continue
+            for base in (start, 0):
+                for i in range(base, len(hay) - size + 1):
+                    if hay[i:i + size] == piece:
+                        return i, i + size - 1
+    return None
+
+
+def load_lemma_anchors(db):
+    """Underline, in the BSB verse, the words Wesley is glossing.
+
+    His lemma is the King James wording. Each is found in the KJV verse (with Strong's on
+    every word), its Strong's numbers collected, and the BSB word slots of the same verse
+    carrying those numbers taken as the anchor — the tightest cluster of them, as a
+    display-word range. A lemma whose words are all translators' additions, or whose
+    numbers do not occur in the BSB verse, is left unanchored and the page shows it as
+    plain italics.
+    """
+    kjv = read_kjv()
+    if not kjv: return 0, 0
+    slots = {}
+    for v, pos, strongs, lang, placeholder in db.execute(
+            "SELECT verse, pos, strongs, lang, untranslated FROM words ORDER BY verse, pos"):
+        if strongs and strongs.isdigit():
+            slots.setdefault(v, []).append((pos, int(strongs), placeholder))
+    rows = []; total = 0
+    for verse, text_id, body in db.execute(
+            "SELECT c.verse, c.text_id, t.body FROM comm c JOIN comm_text t ON t.id = c.text_id"
+            " WHERE c.source = 'wes'"):
+        hay = kjv.get(verse)
+        placed, skip = PLACED.get(verse, (None, 0))
+        if not hay or placed is None or verse not in slots: continue
+        cursor = 0
+        for n, lemma in enumerate(re.findall(r"\*([^*]+)\*", body)):
+            total += 1
+            needle = [t for t in tokens(lemma) if t != "c"]
+            if not needle: continue
+            run = find_run([t for t, _ in hay], needle, cursor)
+            if run is None: continue
+            cursor = run[1] + 1
+            want = set().union(*(hay[i][1] for i in range(run[0], run[1] + 1)))
+            nums = {num for _, num in want}
+            hits = [(pos, ph) for pos, num, ph in slots[verse] if num in nums]
+            if not hits: continue
+            # The tightest cluster: split where more than two slots lie between hits.
+            clusters, cur = [], [hits[0]]
+            for h in hits[1:]:
+                if h[0] - cur[-1][0] > 4: clusters.append(cur); cur = [h]
+                else: cur.append(h)
+            clusters.append(cur)
+            best = max(clusters, key=lambda c: (len(c), -c[0][0]))
+            ws = we = None
+            for pos, ph in best:
+                k = pos - skip
+                if k < 0 or k >= len(placed): continue
+                r = placed[k]
+                if r is None:
+                    # a placeholder slot (". . .") shows nowhere; its words are in the slot before
+                    r = next(((p[1], p[1]) for p in reversed(placed[:k]) if p is not None), None)
+                if r is None: continue
+                ws = r[0] if ws is None else min(ws, r[0])
+                we = r[1] if we is None else max(we, r[1])
+            if ws is None or we - ws > 14: continue
+            rows.append((verse, text_id, n, ws, we))
+    db.executemany("INSERT OR IGNORE INTO comm_anchor(verse,text_id,n,w_start,w_end) VALUES(?,?,?,?,?)", rows)
+    return len(rows), total
+
+
 def load_omitted(db):
     """Verses in the KJV numbering that the BSB leaves out. The BSB explains each in a
     footnote on the verse before, so carry that across."""
@@ -645,6 +780,8 @@ def main(out):
     print(f"  {nb:,} passages  {nl:,} verse links")
     tb, tl = load_tyndale(db); db.commit()
     print(f"  {tb:,} Tyndale notes  {tl:,} verse links")
+    na, nl = load_lemma_anchors(db); db.commit()
+    print(f"  {na:,} of {nl:,} Wesley lemmas anchored to BSB words")
 
     print("omitted verses…", flush=True)
     n = load_omitted(db); db.commit()
@@ -680,7 +817,7 @@ def split(full):
     The two downloads are ATTACHed when present; nothing in the reader needs them."""
     import shutil
     parts = {
-        "bible-reading.db": ["words", "xrefs", "comm", "comm_text"],
+        "bible-reading.db": ["words", "xrefs", "comm", "comm_text", "comm_anchor"],
         "bible-study.db": None,       # built below, not by subtraction
         "bible-commentary.db": None,
     }
@@ -693,7 +830,7 @@ def split(full):
     shutil.copy(full, read)
     d = sqlite3.connect(read)
     d.executescript("DROP TABLE words; DROP TABLE xrefs; DROP TABLE comm; DROP TABLE comm_text;"
-                    " PRAGMA journal_mode=DELETE;")
+                    " DROP TABLE comm_anchor; PRAGMA journal_mode=DELETE;")
     d.execute("VACUUM"); d.commit(); d.close()
 
     def extract(name, script, tables):
@@ -725,7 +862,10 @@ def split(full):
       CREATE TABLE comm_text (id INTEGER PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE comm (verse INTEGER NOT NULL, source TEXT NOT NULL, text_id INTEGER NOT NULL,
         PRIMARY KEY (verse, source)) WITHOUT ROWID;
-    """, ["comm_text", "comm"])
+      CREATE TABLE comm_anchor (verse INTEGER NOT NULL, text_id INTEGER NOT NULL, n INTEGER NOT NULL,
+        w_start INTEGER NOT NULL, w_end INTEGER NOT NULL,
+        PRIMARY KEY (verse, text_id, n)) WITHOUT ROWID;
+    """, ["comm_text", "comm", "comm_anchor"])
 
     import gzip
     for name in ("bible-reading.db", "bible-study.db", "bible-commentary.db"):

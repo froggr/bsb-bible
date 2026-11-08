@@ -66,7 +66,15 @@ data class Commentary(val source: String, val body: String)
  * paragraph to every verse in the range. On the page it is one thing about verses
  * [start] to [end], so it is drawn once with a bracket down the margin, not once per verse.
  */
-data class CommentSpan(val source: String, val body: String, val start: VerseId, val end: VerseId)
+data class CommentSpan(
+    val source: String, val body: String, val start: VerseId, val end: VerseId,
+    /**
+     * For Wesley: where each `*lemma*` of the paragraph (by its index in the body) falls in
+     * the BSB verse, as a display-word range. He quotes the King James; the build carried
+     * the words across by Strong's number. Lemmas it could not place are absent.
+     */
+    val anchors: Map<Int, IntRange> = emptyMap(),
+)
 
 /**
  * Reading order for the commentaries: plainest first.
@@ -116,6 +124,13 @@ class Bible private constructor(private val db: SQLiteDatabase) {
 
     /** Tyndale, Wesley, Matthew Henry and JFB: a download. */
     val hasCommentary: Boolean get() = "comm" in attached
+
+    /** The commentary layer from 0.41 on carries the lemma anchors; an older download does not. */
+    private val hasAnchors: Boolean by lazy {
+        hasCommentary && db.rawQuery(
+            "SELECT 1 FROM comm.sqlite_master WHERE type='table' AND name='comm_anchor'", null
+        ).use { it.moveToFirst() }
+    }
 
     /** Every verse of a chapter, in order, with footnotes attached. */
     fun chapter(book: Int, chapter: Int): List<Verse> {
@@ -218,6 +233,20 @@ class Bible private constructor(private val db: SQLiteDatabase) {
                 spans[key] = had?.copy(end = maxOf(had.end, verse))
                     ?: CommentSpan(key.first, cur.getString(3), verse, verse)
             }
+        }
+        if (hasAnchors) {
+            val anchors = HashMap<Pair<Int, Int>, MutableMap<Int, IntRange>>()
+            db.rawQuery(
+                "SELECT verse, text_id, n, w_start, w_end FROM comm.comm_anchor" +
+                    " WHERE verse >= ? AND verse < ?",
+                arrayOf(verseId(book, chapter, 0).toString(), verseId(book, chapter + 1, 0).toString())
+            ).use { cur ->
+                while (cur.moveToNext())
+                    anchors.getOrPut(cur.getInt(0) to cur.getInt(1)) { HashMap() }[cur.getInt(2)] =
+                        cur.getInt(3)..cur.getInt(4)
+            }
+            for ((key, span) in spans)
+                anchors[span.start to key.second]?.let { spans[key] = span.copy(anchors = it) }
         }
         return spans.values.toList()
     }

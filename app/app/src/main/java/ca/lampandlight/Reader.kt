@@ -284,6 +284,7 @@ fun Reader(
                         },
                         scope = if (row.start != row.verse)
                             "verses ${row.start.verse}\u2013${row.verse.verse}" else null,
+                        anchored = row.anchored,
                     )
                     is Row.Refs -> RefsRow(
                         row.refs.map { r ->
@@ -449,6 +450,9 @@ private fun VerseBlock(
     val endsAt = HashMap<Int, MutableList<Int>>()        // word index -> notes ending there
     anchors.forEachIndexed { k, r -> if (r != null) endsAt.getOrPut(r.last) { mutableListOf() } += k }
     val underlines = ArrayList<IntRange>()
+    // Where each word's letters start and end in the built string, for the gloss underlines.
+    val wordStart = IntArray(row.words.size) { -1 }
+    val wordEnd = IntArray(row.words.size) { -1 }
 
     val body = buildAnnotatedString {
         pushStringAnnotation("num", "1")
@@ -472,6 +476,8 @@ private fun VerseBlock(
             val lit = narratingSpan?.contains(i) == true
             val inMark = partial && markedWords != null && i in markedWords
             anchors.forEachIndexed { k, r -> if (r != null && r.first == i) starts[k] = length }
+            wordStart[i] = length
+            wordEnd[i] = length + w.trimEnd { !it.isLetterOrDigit() }.length
             pushStringAnnotation("w", i.toString())
             withStyle(SpanStyle(
                 background = when {
@@ -506,6 +512,14 @@ private fun VerseBlock(
                 }
             }
         }
+    }
+
+    // The words a commentator is glossing, in the commentary colour, so the eye can go
+    // from his italic lemma to the words of this translation it stands for.
+    val glosses = row.glossAnchors.mapNotNull { r ->
+        val a = wordStart.getOrNull(r.first) ?: return@mapNotNull null
+        val b = wordEnd.getOrNull(r.last) ?: return@mapNotNull null
+        if (a < 0 || b <= a) null else a until b
     }
 
     // The padding is constant and the background only fades in: adding padding when a verse
@@ -557,12 +571,14 @@ private fun VerseBlock(
                 // underlined on both lines.
                 .drawBehind {
                     val l = layout
-                    if (l == null || underlines.isEmpty()) return@drawBehind
+                    if (l == null || (underlines.isEmpty() && glosses.isEmpty())) return@drawBehind
                     val dots = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
                         floatArrayOf(1.5.dp.toPx(), 2.5.dp.toPx()))
                     val width = 1.dp.toPx()
-                    val colour = p.indigo.copy(alpha = if (p.dark) 0.8f else 0.7f)
-                    underlines.forEach { chars ->
+                    val noteColour = p.indigo.copy(alpha = if (p.dark) 0.8f else 0.7f)
+                    val glossColour = p.gold.copy(alpha = if (p.dark) 0.85f else 0.8f)
+                    (glosses.map { it to glossColour } + underlines.map { it to noteColour })
+                        .forEach { (chars, colour) ->
                         val from = l.getLineForOffset(chars.first)
                         val to = l.getLineForOffset(chars.last)
                         for (line in from..to) {

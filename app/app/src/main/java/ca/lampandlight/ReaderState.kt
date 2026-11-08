@@ -41,6 +41,11 @@ sealed interface Row {
          * draws the verse clean.
          */
         val noteAnchors: List<IntRange?> = emptyList(),
+        /**
+         * The words a commentator on the page is glossing — Wesley's lemmas, carried from
+         * the King James by Strong's number. Empty unless his notes are shown.
+         */
+        val glossAnchors: List<IntRange> = emptyList(),
     ) : Row
 
     /**
@@ -74,6 +79,8 @@ sealed interface Row {
         val body: String,
         override val key: String,
         override val margin: Margin = Margin(),
+        /** Which of the body's `*lemmas*` (by index) are underlined in the verse above. */
+        val anchored: Set<Int> = emptySet(),
     ) : Row
 
     /** The cross-references for one verse, drawn as a single line of links. */
@@ -490,6 +497,10 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
                    else emptyList()
         val ending = if (study) commentary.filter { layers.shows(it.source) }.groupBy { it.end }
                      else emptyMap()
+        // Paragraphs whose quoted words are placed in a verse (Wesley), by that verse.
+        val glossing = if (study) commentary.filter { layers.shows(it.source) && it.anchors.isNotEmpty() }
+                           .groupBy { it.start }
+                       else emptyMap()
         // The note lane at verse [v]: the colour of a note covering it, when the note also
         // reaches past it ([beyond]) or merely reaches it.
         fun noteLane(v: VerseId, beyond: Boolean): MarkColor? = noted
@@ -513,6 +524,7 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
                 v, i, words, "v${v.id}",
                 margin = Margin(noteLane(v.id, false), commentLane(v.id, false)),
                 noteAnchors = if (showNotes) v.footnotes.map { it.words } else emptyList(),
+                glossAnchors = glossing[v.id].orEmpty().flatMap { it.anchors.values },
             )
 
             // A note is the reader's own writing: it shows whether or not study mode is on.
@@ -549,6 +561,7 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
                 out += Row.Comment(
                     v.id, c.start, c.source, c.body, "c${c.start}_${c.source}",
                     margin = Margin(noteLane(v.id, true), still),
+                    anchored = c.anchors.keys,
                 )
             }
             if (layers.refs)

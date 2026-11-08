@@ -210,24 +210,35 @@ fun commentaryBody(body: String): String =
  * the verse he is glossing, is marked the same way. Henry and JFB carry none, so they pass
  * through untouched.
  */
-fun commentaryText(body: String): androidx.compose.ui.text.AnnotatedString =
-    italicised(commentaryBody(body))
+fun commentaryText(
+    body: String, tinted: Set<Int> = emptySet(), tint: Color = Color.Unspecified,
+): androidx.compose.ui.text.AnnotatedString =
+    italicised(commentaryBody(body), tinted, tint)
 
-/** Text with `*asterisked*` runs set in italic: the translators' and Tyndale's quotations. */
-fun italicised(clean: String): androidx.compose.ui.text.AnnotatedString {
+/**
+ * Text with `*asterisked*` runs set in italic: the translators' and Tyndale's quotations,
+ * and Wesley's lemmas. The runs whose index is in [tinted] are also coloured [tint]: a
+ * lemma whose words are underlined in the verse above, in the same colour.
+ */
+fun italicised(
+    clean: String, tinted: Set<Int> = emptySet(), tint: Color = Color.Unspecified,
+): androidx.compose.ui.text.AnnotatedString {
     if (!clean.contains('*')) return androidx.compose.ui.text.AnnotatedString(clean)
     return androidx.compose.ui.text.buildAnnotatedString {
-        var i = 0
+        var i = 0; var n = 0
         while (true) {
             val open = clean.indexOf('*', i)
             if (open < 0) { append(clean.substring(i)); break }
             val close = clean.indexOf('*', open + 1)
             if (close < 0) { append(clean.substring(i)); break }
             append(clean.substring(i, open))
-            pushStyle(androidx.compose.ui.text.SpanStyle(fontStyle = FontStyle.Italic))
+            pushStyle(androidx.compose.ui.text.SpanStyle(
+                fontStyle = FontStyle.Italic,
+                color = if (n in tinted) tint else Color.Unspecified,
+            ))
             append(clean.substring(open + 1, close))
             pop()
-            i = close + 1
+            i = close + 1; n++
         }
     }
 }
@@ -272,13 +283,15 @@ fun CommentRow(
     /** How far the paragraph reaches ("verses 1–9") when that is more than one verse. */
     scope: String? = null,
     onSpeak: (() -> Unit)? = null,
+    /** Which `*lemmas*` of the body are underlined in the verse: drawn in the same colour. */
+    anchored: Set<Int> = emptySet(),
 ) {
     val p = LocalPalette.current
     var open by remember(body) { mutableStateOf(false) }
     // The citations are links, in the cross-reference colour, so a commentator's "see
     // Lu 13:6" is one tap away instead of a search. Built once per paragraph.
-    val text = remember(body, verse) {
-        Citations.linked(commentaryText(body), verse, books, p.indigo, onGo)
+    val text = remember(body, verse, anchored) {
+        Citations.linked(commentaryText(body, anchored, p.gold), verse, books, p.indigo, onGo)
     }
     val gap = 18.dp
     val lane = commentLaneColour(p)

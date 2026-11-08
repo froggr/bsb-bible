@@ -93,7 +93,7 @@ known broken.
 | `data/bible-reading.db` | 8.8 MB: verse text, footnotes, marks, search. **This is what ships in the APK** |
 | `data/bible-core.db` | 77 MB: text plus the word layer and cross-references. Build input, not shipped |
 | `data/bible-study.db` | 68 MB: Strong's and cross-references. Downloaded on request (20 MB gzipped) |
-| `data/bible-commentary.db` | 45 MB: Tyndale + Wesley + Matthew Henry + JFB. Downloaded on request (15 MB gzipped) |
+| `data/bible-commentary.db` | 45 MB: Tyndale + Wesley + Matthew Henry + JFB, and where Wesley's lemmas fall in the BSB. Downloaded on request (15 MB gzipped) |
 | `data/beds/` | The music beds that SHIP. Not a source directory — see below |
 | `data/beds/_withvocals/` | Untouched originals for stillness, psalter, evening |
 | `public/beds/` | Untouched originals for morning, shepherd, vigil, upper-room, wilderness |
@@ -142,6 +142,7 @@ Everything is public domain or CC-BY, and all of it is verified as downloading.
 | `crosswire.org/ftpmirror/pub/sword/packages/rawzip/MHC.zip` | 15 MB | Matthew Henry (1710), whole Bible |
 | `…/rawzip/JFB.zip` | 6.3 MB | Jamieson-Fausset-Brown (1871), whole Bible |
 | `…/rawzip/Wesley.zip` | 1.9 MB | John Wesley's Explanatory Notes (1755), whole Bible |
+| `…/rawzip/KJV.zip` | 4.5 MB | King James with Strong's numbers on every word. Build input only: it places Wesley's lemmas |
 | `tyndaleopenresources.com/…/tyndale_open-studynotes.zip` | 2.9 MB | Tyndale Open Study Notes (2022), whole Bible |
 
 BSB text is CC0. Cross-references need the line
@@ -177,6 +178,20 @@ lemma in italics. Two things about his module:
   note, 1 Thess 3:2–12 all at the note on 3:1 — so every repeat is dropped and a note sits
   under the first verse it is on. The cost is that the few genuine ranges (Gen 1:9–13) lose
   their bracket.
+
+**Wesley quotes the King James, the page shows the BSB.** So do Henry and JFB, and Tyndale
+quotes the NLT, but Wesley's whole method is "quote the phrase, gloss it", which made the
+mismatch glaring. From 0.41 each lemma is carried across: it is found in the KJV verse (the
+CrossWire KJV module has a Strong's number on every word), its numbers collected, and the
+BSB word slots of the same verse with those numbers taken as the anchor — the tightest
+cluster, turned into display words by the same `align()` the footnotes use. The page
+underlines those words in the commentary colour and tints the lemma to match. 24,904 of
+28,172 lemmas place; the rest are words the translators supplied ("&c.", "there is"),
+TR/NA differences (Rev 22:18 "testify" is a different Greek word in the two), or a lemma
+quoted from the verse before. The Greek article and the Hebrew object marker are ignored
+when matching, or every lemma would span half its verse. Adjacent lemmas can overlap on the
+page ("that all things" and "work together for good" share "all things"); the order in the
+note is the order in the verse.
 
 Notes on the data, learned the hard way:
 
@@ -351,7 +366,7 @@ in 1 s.
 | words | 441,123 with original, transliteration, Strong's, parsing |
 | footnotes | 4,854 |
 | cross-references | 344,799, vote-ranked |
-| commentary | 54,142 passages → 100,480 verse links, covering 31,116 verses (Wesley: 16,687 notes on 16,703 verses) |
+| commentary | 54,142 passages → 100,480 verse links, covering 31,116 verses (Wesley: 16,687 notes on 16,703 verses, 24,904 lemmas anchored) |
 
 Verse ids are `book*1_000_000 + chapter*1_000 + verse`, so they sort in reading order and a
 chapter is one range scan.
