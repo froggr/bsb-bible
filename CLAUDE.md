@@ -129,6 +129,14 @@ stopped dead and then started again. The cache holds all eight loops (~40 MB) fo
 reason; at three entries nearly every turn paid for a fresh decode. Run-ins are not cached —
 after the first play they are never wanted again.
 
+## Compose text links are a trap
+
+Never put a `LinkAnnotation` in a long text. Compose's link layout computes a path for every
+link on every measure pass, and a commentary paragraph with hundreds of citations held a
+Pixel 9's main thread past the ANR limit (0.41, the first thing a fresh phone hit). Colour the
+range with a `SpanStyle`, tag it with `addStringAnnotation`, and resolve taps from the
+`TextLayoutResult` — `Citations.linked` / `Citations.targetAt`. The emulator never showed it.
+
 ## Verify on a device before claiming it works
 
 Compiling is not working, and `BUILD SUCCESSFUL` is not a test. Two defects shipped in 0.32

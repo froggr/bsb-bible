@@ -8,6 +8,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -289,10 +292,13 @@ fun CommentRow(
     val p = LocalPalette.current
     var open by remember(body) { mutableStateOf(false) }
     // The citations are links, in the cross-reference colour, so a commentator's "see
-    // Lu 13:6" is one tap away instead of a search. Built once per paragraph.
+    // Lu 13:6" is one tap away instead of a search. Built once per paragraph. A tap on the
+    // text is looked up against its layout: on a citation it goes there, anywhere else it
+    // opens or closes the paragraph like a tap on the label.
     val text = remember(body, verse, anchored) {
-        Citations.linked(commentaryText(body, anchored, p.gold), verse, books, p.indigo, onGo)
+        Citations.linked(commentaryText(body, anchored, p.gold), verse, books, p.indigo)
     }
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val gap = 18.dp
     val lane = commentLaneColour(p)
     Row(
@@ -345,6 +351,13 @@ fun CommentRow(
                 color = p.inkSoft,
                 maxLines = if (open) Int.MAX_VALUE else 4,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                onTextLayout = { layout = it },
+                modifier = Modifier.pointerInput(text) {
+                    detectTapGestures { pos ->
+                        val target = layout?.getOffsetForPosition(pos)?.let { Citations.targetAt(text, it) }
+                        if (target != null) onGo(target) else open = !open
+                    }
+                },
             )
             if (!open) {
                 Spacer(Modifier.height(3.dp))

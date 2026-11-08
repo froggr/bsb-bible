@@ -2,9 +2,7 @@ package ca.lampandlight
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 
 /**
@@ -123,25 +121,31 @@ object Citations {
         return total.takeIf { it > 0 }
     }
 
-    /** [text] with its citations made into links in [colour], opening through [onGo]. */
-    fun linked(
-        text: AnnotatedString, verse: VerseId, books: List<Book>, colour: Color,
-        onGo: (VerseId) -> Unit,
-    ): AnnotatedString {
+    /** The annotation tag carrying a citation's target verse id, for [targetAt]. */
+    const val TAG = "cite"
+
+    /**
+     * [text] with its citations coloured [colour] and annotated with their targets.
+     *
+     * Not Compose's `LinkAnnotation`: that makes the text's layout compute a path for
+     * every link on every measure pass, and a Matthew Henry paragraph carries hundreds of
+     * citations — on a Pixel 9 that held the main thread past the five-second ANR limit
+     * (0.41, the first phone it was seen on). A coloured span costs nothing at layout; the
+     * tap is resolved afterwards from the laid-out text with [targetAt].
+     */
+    fun linked(text: AnnotatedString, verse: VerseId, books: List<Book>, colour: Color): AnnotatedString {
         val links = find(text.text, verse, books)
         if (links.isEmpty()) return text
         return buildAnnotatedString {
             append(text)
             for (l in links) {
-                addLink(
-                    LinkAnnotation.Clickable(
-                        tag = l.target.toString(),
-                        styles = TextLinkStyles(style = SpanStyle(color = colour)),
-                        linkInteractionListener = { onGo(l.target) },
-                    ),
-                    l.start, l.end,
-                )
+                addStyle(SpanStyle(color = colour), l.start, l.end)
+                addStringAnnotation(TAG, l.target.toString(), l.start, l.end)
             }
         }
     }
+
+    /** The verse a tap at character [offset] of a [linked] text goes to, if it is on one. */
+    fun targetAt(text: AnnotatedString, offset: Int): VerseId? =
+        text.getStringAnnotations(TAG, offset, offset).firstOrNull()?.item?.toIntOrNull()
 }
