@@ -28,8 +28,8 @@ android {
         applicationId = "ca.lampandlight"
         minSdk = 29
         targetSdk = 36
-        versionCode = 43
-        versionName = "0.43"
+        versionCode = 44
+        versionName = "0.44"
         // Phonon ships arm64-v8a and x86_64 only; a 32-bit install would fail to load the .so.
         // ANDROID_ABIS=arm64-v8a builds a phone-only APK, about 9 MB smaller than one that
         // also carries the emulator's x86_64 library.
@@ -80,6 +80,10 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("net.java.dev.jna:jna:5.17.0@aar")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // Reading the pages of an epub. Small, pure Java, and forgiving of the markup
+    // self-published books actually contain.
+    implementation("org.jsoup:jsoup:1.17.2")
+    testImplementation("junit:junit:4.13.2")
 
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))
     implementation("androidx.compose.ui:ui")

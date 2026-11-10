@@ -40,6 +40,13 @@ class Prefs(ctx: Context) {
     /** Whether a chapter read to its end runs on into the next. */
     var readOn by mutableStateOf(sp.getBoolean("readOn", true))
 
+    /** The book that was open when the app was left, to open in again; empty for the Bible. */
+    var openBook: String
+        get() = sp.getString("openBook", "") ?: ""
+        set(v) { if (v != openBook) sp.edit().putString("openBook", v).apply() }
+    /** How the shelf is ordered: recent, title or author. */
+    var shelfOrder by mutableStateOf(sp.getString("shelfOrder", "recent") ?: "recent")
+
     /** Whether the chapter is laid out for study, and which layers show in it. */
     var study by mutableStateOf(sp.getBoolean("study", false))
     var studyCommentary by mutableStateOf(sp.getBoolean("studyComm", true))
@@ -129,6 +136,7 @@ class Prefs(ctx: Context) {
             .putBoolean("studyRefs", studyRefs)
             .putBoolean("studyNotes", studyFootnotes)
             .putString("commOff", commentaryOff)
+            .putString("shelfOrder", shelfOrder)
             .apply()
     }
 }
@@ -554,7 +562,7 @@ fun LibraryScreen(bible: Bible, onOpen: (VerseId) -> Unit, onClose: () -> Unit) 
 
 /** The small menu behind "Marks & settings". */
 @Composable
-fun MenuScreen(onLibrary: () -> Unit, onSettings: () -> Unit, onClose: () -> Unit) {
+fun MenuScreen(onBooks: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onClose: () -> Unit) {
     val p = LocalPalette.current
     Column(
         Modifier.fillMaxSize().background(p.paper)
@@ -570,6 +578,7 @@ fun MenuScreen(onLibrary: () -> Unit, onSettings: () -> Unit, onClose: () -> Uni
                 color = p.gold, modifier = Modifier.clickable { onClose() }.padding(8.dp),
             )
         }
+        MenuItem("Books", "Your own epubs, read and listened to here", onBooks)
         MenuItem("Marks and notes", "Everything you have coloured or written on", onLibrary)
         MenuItem("Settings", "Text size, theme, music, study material", onSettings)
     }

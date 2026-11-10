@@ -396,6 +396,11 @@ class Narrator(private val ctx: Context) {
     private fun clausesOf(words: List<String>): List<Clause> {
         val out = mutableListOf<Clause>()
         var start = 0
+        // A word may be blank: a book's "Genesis 3:8-9 (ESV)" is said as one phrase standing
+        // in the first word's place, and the rest keep their places on the page with nothing
+        // to say. Blanks are left out of what is spoken and never end a clause themselves.
+        fun said(from: Int, to: Int) =
+            words.subList(from, to + 1).filter { it.isNotBlank() }.joinToString(" ")
         words.forEachIndexed { i, w ->
             val hard = w.endsWith(".") || w.endsWith("!") || w.endsWith("?") ||
                 w.endsWith(".\u201d") || w.endsWith("!\u201d") || w.endsWith("?\u201d")
@@ -408,13 +413,14 @@ class Narrator(private val ctx: Context) {
                     hard -> PAUSE_STOP
                     else -> PAUSE_BREATH
                 }
-                out += Clause(start..i, words.subList(start, i + 1).joinToString(" "), pause)
-                start = i + 1
+                val text = said(start, i)
+                if (text.isNotEmpty()) out += Clause(start..i, text, pause)
+                // Nothing to say at the very end: the pause that closes the block goes to
+                // the clause before, which would otherwise run straight into the next one.
+                else if (last && out.isNotEmpty()) out[out.lastIndex] = out.last().copy(pause = PAUSE_VERSE)
+                if (text.isNotEmpty() || last) start = i + 1
             }
         }
-        // A verse with no stop at all is one clause.
-        if (out.isEmpty() && words.isNotEmpty())
-            out += Clause(words.indices, words.joinToString(" "), PAUSE_VERSE)
         return out
     }
 

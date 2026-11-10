@@ -63,6 +63,15 @@
                 <data android:scheme="https" android:host="biblehub.com" />
                 <data android:scheme="https" android:host="www.biblehub.com" />
             </intent-filter>
+            <!-- A book: an epub opened from a file manager, a download or a message goes
+                 onto the shelf. It is copied into the app's own storage and stays there. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/epub+zip" />
+            </intent-filter>
         </activity>
         <!-- The measuring harness, kept reachable but off the launcher. -->
         <activity

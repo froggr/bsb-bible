@@ -85,6 +85,11 @@ object Reference {
         "1jo" to "1john", "2jo" to "2john", "3jo" to "3john",
         "jud" to "jude", "jde" to "jude",
         "re" to "revelation", "rev" to "revelation", "rv" to "revelation",
+        // What the books are called by people who are not looking at the contents page,
+        // and how Philippians is actually spelled when it is typed in a hurry.
+        "psalms" to "psalm", "revelations" to "revelation",
+        "songofsongs" to "songofsolomon", "songs" to "songofsolomon", "canticles" to "songofsolomon",
+        "phillipians" to "philippians", "philipians" to "philippians", "phillippians" to "philippians",
     )
 
     /** Lower-case, strip everything but letters and digits: "1 Cor." -> "1cor". */

@@ -37,6 +37,10 @@ Needs Android 10 or newer, and about 120 MB free once the voice is downloaded.
   A translator's note marks the words it is about with a small letter and a dotted underline,
   and quotes them.
 - **Scripture cited in the commentary is a link.** Tap `Rom 5:6-8` and you are there.
+- **Your own books, on the same page.** Bring in the epubs you already own, a folder at a
+  time, and they are set in the same type and read in the same voice as the Bible. Every
+  Scripture reference in them opens its passage in a sheet over the page, so the place in
+  the book is never lost. Books stay on the phone: they are not uploaded and never ship.
 - **It remembers where you were**, down to the verse.
 - **Other apps can open it at a passage.** A `bsb://open?ref=John 3:16` link, or a BibleGateway,
   YouVersion or BibleHub link, opens the app on that verse (details under *Opening the app at a
@@ -230,6 +234,8 @@ Notes on the data, learned the hard way:
 | Note sheet | writing on a verse, with the verse in front of you |
 | Search | full text, debounced, matches emboldened |
 | Marks and notes | everything coloured or written on |
+| Books | the shelf: epubs brought in from the phone, with covers, the place kept, sort and filter |
+| Book | one book open: chapter text in the app's own type, narration, citations that open their passage |
 | Settings | text size, theme, voice, study downloads, music, manual update check |
 | Player | read aloud, speed, voice, music bed, volume |
 
@@ -274,6 +280,33 @@ Traps worth knowing, all found on device:
 - **Don't record a bar/view height with a high-water mark.** `if (h > topBarPx) topBarPx = h`
   fed `contentPadding`, which then never shrank when the bar did, and every verse under the
   finger read a couple too low.
+
+## Books
+
+`Epub.kt` takes an epub apart into blocks (a title, a paragraph, a quotation, the reference
+under it) and the app sets them again in its own type. The publisher's stylesheet is consulted
+for three things only: bold, italic and alignment. Nothing in `Epub.kt` touches Android, so
+`EpubTest` runs it under a plain JVM against real books:
+
+```sh
+EPUB_SAMPLES=/path/a.epub:/path/b.epub EPUB_DIGEST=/tmp/digest.txt ./gradlew testDebugUnitTest
+```
+
+`Library.kt` copies each book into the app's private storage (`files/books/`, indexed in
+`files/books.db`) with where it was left. `BookSession.kt` is where a chapter meets the Bible:
+every reference is looked up so that only passages that exist become links, the paragraph over
+a reference is recognised as the quotation it is, and each block gets the words the narrator
+says ("Genesis 3:8-9 (ESV)" is said "Genesis 3, verses 8 to 9"). `Shelf.kt` and `BookReader.kt`
+are the two screens.
+
+- **Books are the reader's own and never ship.** No epub goes into the repository, the APK or
+  a release, test samples included. The tests take their books from `EPUB_SAMPLES`.
+- **Android's folder picker refuses `Download` itself** and the storage root ("Can't use this
+  folder"). A folder inside it, such as `Download/Books`, works.
+- **Opening a passage in the Bible from a book leaves the book's title in the top bar** as the
+  way back, and going back restores the Bible to where it was.
+- Not built: highlights and notes in books, footnote pop-ups, PDFs, and the index of which
+  books cite a passage.
 
 ## Opening the app at a passage
 

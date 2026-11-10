@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -159,7 +160,15 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
     // The span being written on: one verse, or a range. Not a bare id — a note taken on a
     // selection belongs to all of it.
     var noting by remember { mutableStateOf<Pair<VerseId, VerseId>?>(null) }
-    var screen by remember { mutableStateOf("read") }
+    // A book that was open when the app was left is where it opens again, unless it was
+    // started by a link to a passage or by a book handed over from another app.
+    val cold = remember { MainActivity.arriving }
+    var screen by remember {
+        mutableStateOf(
+            if (prefs.openBook.isNotBlank() && Deeplink.verseOf(cold, bible.books) == null &&
+                epubOf(cold) == null) "book" else "read"
+        )
+    }
     // The verse whose action sheet is open, with its row index so "read from here" works.
     var acting by remember { mutableStateOf<Pair<VerseId, Int>?>(null) }
     // The last bookmark tap, kept just long enough to offer it back.
@@ -174,6 +183,59 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
     LaunchedEffect(Unit) {
         state.background = { work -> scope.launch(Dispatchers.IO) { work() } }
         state.restoreStudy(prefs.study, prefs.studyLayers())
+    }
+
+    // The reader's own books, and the one that is open.
+    val library = remember { Library(ctx.applicationContext) }
+    var session by remember { mutableStateOf<BookSession?>(null) }
+    var opening by remember { mutableStateOf(false) }
+    // A passage opened in the Bible from a book leaves the book's name in the top bar as
+    // the way back. It holds for as long as the Bible is where the book put it — the depth
+    // of its history then — and gives way to the Bible's own trail past that.
+    var crumbAt by remember { mutableIntStateOf(-1) }
+    var crumbPushed by remember { mutableStateOf(false) }
+
+    val openBook: (String) -> Unit = open@{ id ->
+        if (session?.id == id) { narrator.reset(); screen = "book"; return@open }
+        if (opening) return@open
+        opening = true
+        scope.launch {
+            val s = BookSession.open(id, library, bible)
+            if (s == null) {
+                val name = library.volume(id)?.title ?: "That book"
+                library.report = Library.Report(0, 0, listOf(name to "could not be opened"))
+                if (prefs.openBook == id) prefs.openBook = ""
+                if (screen == "book") screen = "books"
+            } else {
+                val v = library.volume(id)
+                s.go(v?.section ?: 0, v?.block ?: 0)
+                narrator.reset()
+                session?.close()
+                session = s
+                library.touch(id)
+                prefs.openBook = id
+                crumbAt = -1
+                screen = "book"
+            }
+            opening = false
+        }
+    }
+    // Back to the shelf: the book is shut, and the place it was shut at is kept by the page
+    // itself as it leaves.
+    val shutBook = {
+        narrator.reset()
+        val s = session
+        session = null
+        crumbAt = -1
+        prefs.openBook = ""
+        screen = "books"
+        // After the page has gone and written its place.
+        if (s != null) scope.launch { kotlinx.coroutines.delay(600); s.close() }
+        Unit
+    }
+    LaunchedEffect(Unit) {
+        val id = prefs.openBook
+        if (screen == "book" && id.isNotBlank()) openBook(id)
     }
 
     // Pick the bed back up where it was left, including after the screen slept.
@@ -193,8 +255,19 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
     LaunchedEffect(MainActivity.arriving) {
         val intent = MainActivity.arriving ?: return@LaunchedEffect
         MainActivity.arriving = null
+        // A book, opened from a file manager or a download: onto the shelf with it.
+        epubOf(intent)?.let { uri ->
+            narrator.reset()
+            session?.let { s -> session = null; scope.launch { kotlinx.coroutines.delay(600); s.close() } }
+            prefs.openBook = ""
+            crumbAt = -1
+            library.add(listOf(uri))
+            screen = "books"
+            return@LaunchedEffect
+        }
         val landing = Deeplink.verseOf(intent, bible.books) ?: return@LaunchedEffect
         narrator.reset()
+        crumbAt = -1
         screen = "read"
         land(landing.at, landing.to)
     }
@@ -203,7 +276,13 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
     // — briefly — rather than reading the verses and skipping the commentary.
     LaunchedEffect(Unit) {
         narrator.onChapterEnd = {
-            if (prefs.readOn) {
+            val s = session
+            if (screen == "book" && s != null) {
+                if (prefs.readOn && s.hasNext) scope.launch {
+                    s.go(s.index + 1)
+                    narrator.speak(s.lines(), 0)
+                }
+            } else if (prefs.readOn) {
                 val was = state.book to state.chapter
                 state.nextChapter()
                 // Revelation 22 has no next chapter: nextChapter() leaves us where we are,
@@ -235,16 +314,22 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
 
     // The notification is what lets the reading survive the screen going off, and the only
     // way to stop it without unlocking.
-    LaunchedEffect(narrator.speaking, bed.playing, state.book, state.chapter) {
+    val heard = session?.takeIf { screen == "book" }
+    LaunchedEffect(narrator.speaking, bed.playing, state.book, state.chapter, heard, heard?.index) {
         if (narrator.speaking || bed.playing) {
             ReadingService.hold = { narrator.stop(); bed.pause() }
             ReadingService.start(
                 ctx,
                 // Music on its own is not "reading Psalm 23"; say what is actually sounding.
-                if (narrator.speaking)
-                    bible.reference(verseId(state.book, state.chapter, 1)).substringBeforeLast(":")
-                else "Music",
+                if (!narrator.speaking) "Music"
+                else if (heard != null) heard.title
+                else bible.reference(verseId(state.book, state.chapter, 1)).substringBeforeLast(":"),
                 buildString {
+                    if (narrator.speaking && heard != null) {
+                        val at = heard.section
+                        val name = at?.title?.replace('\n', ' ')?.ifBlank { null } ?: at?.label
+                        if (name != null) append(name).append(" \u00b7 ")
+                    }
                     if (narrator.speaking) append(narrator.voice)
                     // What is actually sounding — under rotation the bed changes while the
                     // notification stays up.
@@ -292,6 +377,18 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
             prefs = prefs,
             onSearch = { screen = "search" },
             onMenu = { screen = "menu" },
+            // The voice belongs to whichever page is in front.
+            voiced = screen != "book",
+            onBooks = { narrator.reset(); screen = if (session != null) "book" else "books" },
+            crumb = session?.takeIf { crumbAt >= 0 && state.depth == crumbAt }?.title,
+            onCrumb = {
+                narrator.reset()
+                // Put the Bible back where it was before the book sent it somewhere.
+                if (crumbPushed) state.back()
+                crumbAt = -1
+                selection = emptySet()
+                screen = "book"
+            },
             selection = selection,
             // Tap a verse number and the verse is selected; tap another, further down the
             // page or up it, and everything between the two is. Then the colour row and
@@ -406,12 +503,22 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
 
     // Back closes whatever is open before it leaves the app.
     androidx.activity.compose.BackHandler(
-        enabled = screen != "read" || selection.isNotEmpty() || state.canGoBack
+        enabled = screen != "read" || selection.isNotEmpty() || state.canGoBack ||
+            (session != null && crumbAt >= 0 && state.depth == crumbAt)
     ) {
         when {
+            screen == "book" -> shutBook()
+            screen == "books" -> screen = "read"
             selection.isNotEmpty() -> selection = emptySet()
             screen == "library" || screen == "settings" -> screen = "menu"
             screen != "read" -> screen = "read"
+            // A passage a book opened: back is back to the book.
+            session != null && crumbAt >= 0 && state.depth == crumbAt -> {
+                narrator.reset()
+                if (crumbPushed) state.back()
+                crumbAt = -1
+                screen = "book"
+            }
             // On the page itself, back retraces the links that were followed.
             else -> { narrator.reset(); state.back() }
         }
@@ -423,7 +530,40 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
             onOpen = { v, to -> screen = "read"; narrator.reset(); land(v, to) },
             onClose = { screen = "read" },
         )
+        "books" -> ShelfScreen(
+            library = library,
+            prefs = prefs,
+            rate = prefs.rate,
+            onOpen = openBook,
+            onClose = { screen = "read" },
+        )
+        "book" -> {
+            val s = session
+            // The moment between the tap and the first page: paper, not the Bible showing through.
+            if (s == null) Box(
+                Modifier.fillMaxSize().background(LocalPalette.current.paper)
+                    .pointerInput(Unit) { }
+            )
+            else BookReader(
+                session = s,
+                bible = bible,
+                narrator = narrator,
+                bed = bed,
+                prefs = prefs,
+                onShelf = shutBook,
+                onBible = { narrator.reset(); crumbAt = -1; screen = "read" },
+                onOpenBible = { at, to ->
+                    narrator.reset()
+                    val before = state.depth
+                    land(at, to)
+                    crumbPushed = state.depth > before
+                    crumbAt = state.depth
+                    screen = "read"
+                },
+            )
+        }
         "menu" -> MenuScreen(
+            onBooks = { screen = if (session != null) "book" else "books" },
             onLibrary = { screen = "library" },
             onSettings = { screen = "settings" },
             onClose = { screen = "read" },
@@ -678,4 +818,16 @@ private fun UpdateBar(version: String, onInstall: () -> Unit, onDismiss: () -> U
             }
         }
     }
+}
+
+/**
+ * The book an intent hands over, if it hands one over: an epub opened from a file manager,
+ * a download or a message. Some senders give the proper type and some only the name.
+ */
+internal fun epubOf(intent: Intent?): android.net.Uri? {
+    if (intent == null || intent.action != Intent.ACTION_VIEW) return null
+    val uri = intent.data ?: return null
+    if (uri.scheme != "content" && uri.scheme != "file") return null
+    val named = uri.lastPathSegment?.endsWith(".epub", ignoreCase = true) == true
+    return if (intent.type == "application/epub+zip" || named) uri else null
 }

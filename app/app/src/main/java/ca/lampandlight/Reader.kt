@@ -80,8 +80,19 @@ fun Reader(
     dragSpan: Pair<VerseId, VerseId>?,
     bed: Bed,
     prefs: Prefs,
+    /**
+     * Whether the voice is this page's. While a book is open the narrator is reading that,
+     * and this screen — still composed underneath — must not follow it down the chapter.
+     */
+    voiced: Boolean = true,
+    onBooks: () -> Unit = {},
+    /** The book a passage was opened from, to go back to; null when there is none. */
+    crumb: String? = null,
+    onCrumb: () -> Unit = {},
 ) {
     val p = LocalPalette.current
+    val speaking = voiced && narrator.speaking
+    val sounding = if (voiced) narrator.verseIndex else -1
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var chromeVisible by remember { mutableStateOf(true) }
@@ -101,8 +112,8 @@ fun Reader(
     val dragging by remember {
         derivedStateOf { list.interactionSource.let { _ -> list.isScrollInProgress } }
     }
-    LaunchedEffect(dragging, narrator.speaking) {
-        if (dragging && !narrator.speaking) chromeVisible = false
+    LaunchedEffect(dragging, speaking) {
+        if (dragging && !speaking) chromeVisible = false
     }
     // Reading down hides the bars; reaching back up is the gesture for wanting them again,
     // the way a reader lifts their eyes. They also return once the page comes to rest.
@@ -120,8 +131,8 @@ fun Reader(
         }
     }
     // Reading always brings the player back.
-    LaunchedEffect(narrator.speaking) {
-        if (narrator.speaking) chromeVisible = true
+    LaunchedEffect(speaking) {
+        if (speaking) chromeVisible = true
     }
 
     // Remember what is at the top of the screen, so going back returns to the place in the
@@ -164,8 +175,8 @@ fun Reader(
 
     // Follow the narration, but only when the verse has actually left the comfortable part
     // of the screen: scrolling on every verse drags the page out from under the reader.
-    LaunchedEffect(narrator.verseIndex) {
-        val i = narrator.verseIndex
+    LaunchedEffect(sounding) {
+        val i = sounding
         if (i < 0 || i >= verses.size) return@LaunchedEffect
         val target = state.rowOfVerse(i)
         if (target < 0) return@LaunchedEffect
@@ -236,8 +247,8 @@ fun Reader(
                     is Row.Title -> PsalmTitle(row.text)
                     is Row.Verse -> VerseBlock(
                         row = row,
-                        narratingSpan = if (narrator.verseIndex == row.index) narrator.wordSpan else null,
-                        reading = narrator.verseIndex == row.index,
+                        narratingSpan = if (sounding == row.index) narrator.wordSpan else null,
+                        reading = sounding == row.index,
                         mark = state.markOf(row.verse.id),
                         markedWords = state.markedWords(row.verse.id, row.words.size)?.first,
                         // The selection is a range: its two ends, and everything between.
@@ -324,8 +335,8 @@ fun Reader(
         ) {
             TopBar(
                 label = "${book?.name ?: ""} ${state.chapter}",
-                onPick = {}, onPrev = {}, onNext = {}, onSearch = {}, onMenu = {},
-                backTo = state.backLabel(), onBack = {},
+                onPick = {}, onPrev = {}, onNext = {}, onSearch = {}, onMenu = {}, onBooks = {},
+                backTo = crumb ?: state.backLabel(), onBack = {},
                 study = state.study, studyBusy = state.studyLoading,
                 onStudy = {}, onStudyLayers = {},
             )
@@ -345,8 +356,10 @@ fun Reader(
                 onNext = { scope.launch { state.nextChapter() } },
                 onSearch = onSearch,
                 onMenu = onMenu,
-                backTo = state.backLabel(),
-                onBack = { narrator.reset(); state.back() },
+                onBooks = onBooks,
+                // Out of a book and into the passage it cited: the way back is to the book.
+                backTo = crumb ?: state.backLabel(),
+                onBack = { if (crumb != null) onCrumb() else { narrator.reset(); state.back() } },
                 study = state.study,
                 studyBusy = state.studyLoading,
                 onStudy = {
@@ -359,13 +372,18 @@ fun Reader(
 
         // ---- player ----
         AnimatedVisibility(
-            visible = chromeVisible || narrator.speaking,
+            visible = chromeVisible || speaking,
             enter = fadeIn() + slideInVertically { it },
             exit = fadeOut() + slideOutVertically { it },
             modifier = Modifier.align(Alignment.BottomCenter)
                 .onSizeChanged { if (it.height > playerPx) playerPx = it.height },
         ) {
-            PlayerBar(narrator, state, bed, prefs)
+            PlayerBar(
+                narrator, bed, prefs,
+                reading = "reading verse ${state.verses.getOrNull(sounding)?.id?.verse ?: ""}",
+                resume = "Continue from verse ${state.verses.getOrNull(narrator.resumeAt)?.id?.verse ?: ""}",
+                onPlay = { narrator.speak(state.narrationLines(), narrator.resumeAt) },
+            )
         }
 
         // Bringing the chrome back must never cost a scroll. A full-screen catcher used to
@@ -670,6 +688,7 @@ private fun TopBar(
     onNext: () -> Unit,
     onSearch: () -> Unit,
     onMenu: () -> Unit,
+    onBooks: () -> Unit,
     /** Where following a link would return to, named; null when nothing was followed. */
     backTo: String?,
     onBack: () -> Unit,
@@ -715,12 +734,19 @@ private fun TopBar(
             ) {
                 // Named, because "back" alone does not say where: after three links the
                 // reader has lost the thread without it. Search stays reachable alongside.
-                if (backTo != null) {
-                    TextAction("‹ $backTo", onBack)
+                // The name gives way before anything else does: a book's title can be long,
+                // and the row has four other things to hold.
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    if (backTo != null) {
+                        Box(Modifier.weight(1f, fill = false)) { TextAction("‹ $backTo", onBack) }
+                        Spacer(Modifier.width(16.dp))
+                    }
+                    TextAction("Search", onSearch)
                     Spacer(Modifier.width(16.dp))
+                    // The reader's own books, read and listened to the same way.
+                    TextAction("Books", onBooks)
+                    Spacer(Modifier.width(12.dp))
                 }
-                TextAction("Search", onSearch)
-                Spacer(Modifier.weight(1f))
                 // Study sits with the reading, not in settings: it is a way of reading the
                 // page rather than a preference, and it gets switched on and off mid-chapter.
                 StudyToggle(study, studyBusy, onStudy, onStudyLayers)
@@ -783,12 +809,13 @@ private fun StudyToggle(
 }
 
 @Composable
-private fun TextAction(label: String, onClick: () -> Unit) {
+internal fun TextAction(label: String, onClick: () -> Unit) {
     val p = LocalPalette.current
     Text(
         label,
         fontFamily = UiFont, fontSize = 11.5.sp, fontWeight = FontWeight.Medium,
         letterSpacing = 0.4.sp, color = p.inkSoft,
+        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         modifier = Modifier
             .clickable(
                 indication = null,
@@ -799,7 +826,7 @@ private fun TextAction(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Chip(label: String, onClick: () -> Unit) {
+internal fun Chip(label: String, onClick: () -> Unit) {
     val p = LocalPalette.current
     Surface(
         onClick = onClick,
@@ -815,8 +842,17 @@ private fun Chip(label: String, onClick: () -> Unit) {
     }
 }
 
+/**
+ * The player, shared by the Bible and by a book. What is being read is the caller's to say:
+ * [reading] while the voice is going, [resume] when it was stopped part-way, and [onPlay]
+ * starts it — the bar itself only knows the voice, the music and the pace.
+ */
 @Composable
-private fun PlayerBar(narrator: Narrator, state: ReaderState, bed: Bed, prefs: Prefs) {
+internal fun PlayerBar(
+    narrator: Narrator, bed: Bed, prefs: Prefs,
+    reading: String, resume: String?, onPlay: () -> Unit,
+    idle: String = "Read aloud",
+) {
     val p = LocalPalette.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     // Which control is unfolded, if any. Only one at a time: the panel is a drawer, not a form.
@@ -979,8 +1015,7 @@ private fun PlayerBar(narrator: Narrator, state: ReaderState, bed: Bed, prefs: P
             ) {
                 Surface(
                     onClick = {
-                        if (narrator.speaking) narrator.stop()
-                        else narrator.speak(state.narrationLines(), narrator.resumeAt)
+                        if (narrator.speaking) narrator.stop() else onPlay()
                     },
                     shape = CircleShape,
                     color = p.gold,
@@ -1006,12 +1041,10 @@ private fun PlayerBar(narrator: Narrator, state: ReaderState, bed: Bed, prefs: P
                     Text(
                         when {
                             narrator.preparing -> "warming up…"
-                            narrator.speaking && narrator.verseIndex >= 0 ->
-                                "reading verse ${state.verses.getOrNull(narrator.verseIndex)?.id?.verse ?: ""}"
+                            narrator.speaking && narrator.verseIndex >= 0 -> reading
                             narrator.error != null -> narrator.error!!
-                            narrator.resumeAt > 0 ->
-                                "Continue from verse ${state.verses.getOrNull(narrator.resumeAt)?.id?.verse ?: ""}"
-                            else -> "Read aloud"
+                            narrator.resumeAt > 0 && resume != null -> resume
+                            else -> idle
                         },
                         fontFamily = UiFont, fontSize = 13.sp, fontWeight = FontWeight.Medium,
                         color = if (narrator.error != null) p.gold else p.ink,

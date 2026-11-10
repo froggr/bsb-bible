@@ -404,6 +404,9 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
     /** True when there is somewhere to go back to. */
     val canGoBack: Boolean get() = history.isNotEmpty()
 
+    /** How many steps back there are: a place can be told from the ones reached after it. */
+    val depth: Int get() = history.size
+
     /** A short label for the back control: "Psalm 23:4". */
     fun backLabel(): String? = history.lastOrNull()?.let { (b, c, v) ->
         val name = bible.books.getOrNull(b - 1)?.name ?: return@let null

@@ -137,6 +137,33 @@ Pixel 9's main thread past the ANR limit (0.41, the first thing a fresh phone hi
 range with a `SpanStyle`, tag it with `addStringAnnotation`, and resolve taps from the
 `TextLayoutResult` — `Citations.linked` / `Citations.targetAt`. The emulator never showed it.
 
+## A regex that passes on the desktop can fail on the phone
+
+**Never use `\G` with `Regex.find(text, from)`.** On the desktop JVM it anchors at `from`; on
+Android (ICU) it never matches, because a `find` given a start index forgets the last match
+end. `CitationsTest` passed while the phone dropped every range, list and translation suffix
+after a citation in a book, and the "; 15:3" continuation in commentary had been dead
+since 0.38. Use `Regex.matchAt(text, index)` with
+no `\G`. More generally: a green JVM test of anything regex-shaped is not evidence about the
+phone.
+
+## Books
+
+**No epub ever goes into the repository, the APK or a release**, the samples Joe sent
+included. They are his own copies. Tests read theirs from the `EPUB_SAMPLES` environment
+variable; keep it that way.
+
+**Android's folder picker refuses `Download` itself and the storage root** ("Can't use this
+folder. To protect your privacy, choose another folder"). Push test books to a subfolder such
+as `/sdcard/Download/Books`.
+
+**`adb shell am start` cannot hand the app an epub**: the shell cannot grant read access to a
+document URI, so the import fails with a `SecurityException` that is the test's fault. Tap the
+file in the emulator's Files app instead.
+
+**A full-screen overlay needs `.pointerInput(Unit) {}` on its root**, or touches fall through
+to the Bible reader, which stays composed underneath every other screen.
+
 ## Verify on a device before claiming it works
 
 Compiling is not working, and `BUILD SUCCESSFUL` is not a test. Two defects shipped in 0.32

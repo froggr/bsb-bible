@@ -299,6 +299,17 @@ class Bible private constructor(private val db: SQLiteDatabase) {
             buildList { while (c.moveToNext()) add(c.getInt(0) to c.getString(1)) }
         }
 
+    /**
+     * The verses from [from] to [to], inclusive, as plain text — a passage quoted somewhere
+     * else and looked up. A whole chapter is asked for as verse 1 to verse 999.
+     */
+    fun passage(from: VerseId, to: VerseId): List<Pair<VerseId, String>> =
+        // Ids are numbers of our own making, so they go in as numbers: a bound argument
+        // arrives as text.
+        db.rawQuery("SELECT id,text FROM verses WHERE id BETWEEN $from AND $to ORDER BY id LIMIT 200", null).use { c ->
+            buildList { while (c.moveToNext()) add(c.getInt(0) to c.getString(1)) }
+        }
+
     /** The BSB leaves 16 disputed verses out; say so rather than showing a gap. */
     fun omissionNote(verse: VerseId): String? =
         db.rawQuery("SELECT note FROM omitted WHERE id=?", arrayOf(verse.toString())).use { c ->
