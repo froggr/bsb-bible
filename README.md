@@ -305,6 +305,9 @@ are the two screens.
   folder"). A folder inside it, such as `Download/Books`, works.
 - **Opening a passage in the Bible from a book leaves the book's title in the top bar** as the
   way back, and going back restores the Bible to where it was.
+- **Footnote marks and printed page numbers are dropped from the running text** (`noteLink`,
+  `pageMark` in `Epub.kt`), because the voice would read them. A footnote link is only dropped
+  when its target or class says it is a note, so "see page 12" keeps its number.
 - Not built: highlights and notes in books, footnote pop-ups, PDFs, and the index of which
   books cite a passage.
 

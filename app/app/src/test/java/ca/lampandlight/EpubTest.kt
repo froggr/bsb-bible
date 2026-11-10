@@ -13,6 +13,8 @@ import java.io.File
  *     EPUB_SAMPLES=/path/a.epub:/path/b.epub EPUB_DIGEST=/tmp/digest.txt \
  *         ./gradlew cleanTestDebugUnitTest testDebugUnitTest
  *
+ * EPUB_FULL=-1 prints every block and EPUB_WIDTH=100000 every word of each.
+ *
  * The digest is for reading, not asserting: whether a bold line is a subheading or a
  * sentence being stressed is a judgement, and the way to check it is to look.
  */
@@ -21,6 +23,7 @@ class EpubTest {
         val samples = System.getenv("EPUB_SAMPLES").orEmpty().split(':').filter { it.isNotBlank() }
         assumeTrue(samples.isNotEmpty())
         val out = StringBuilder()
+        val width = System.getenv("EPUB_WIDTH")?.toIntOrNull() ?: 150
         for (path in samples) {
             val t0 = System.nanoTime()
             Epub(File(path)).use { book ->
@@ -44,7 +47,7 @@ class EpubTest {
                             if (b.src != null) append(" ${b.src}")
                         }
                         val text = b.text.replace("\n", "⏎")
-                        out.append("   ${b.kind.name.padEnd(7)}$marks | ${if (text.length > 150) text.take(150) + "…" else text}\n")
+                        out.append("   ${b.kind.name.padEnd(7)}$marks | ${if (text.length > width) text.take(width) + "…" else text}\n")
                     }
                     if (shown.size < blocks.size) out.append("   … ${blocks.size - shown.size} more: ${blocks.drop(14).groupingBy { it.kind }.eachCount()}\n")
                 }

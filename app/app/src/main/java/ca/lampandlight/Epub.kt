@@ -432,7 +432,8 @@ class Epub(file: File) : Closeable {
             val style = el.attr("style").lowercase()
             when {
                 tag in DROPPED || (tag == "sup" && NOTE_MARK.matches(el.text().trim())) ||
-                    (tag == "a" && "noteref" in el.attr("epub:type")) -> { skip++; f = f or SKIP }
+                    (tag == "a" && "noteref" in el.attr("epub:type")) ||
+                    pageMark(el, tag, classes) || noteLink(el, tag, classes) -> { skip++; f = f or SKIP }
                 tag in BLOCKS -> {
                     flush()
                     val up = stack.lastOrNull()
@@ -489,6 +490,30 @@ class Epub(file: File) : Closeable {
             if (f and BOLDED != 0 && --bold == 0 && f and BLOCK == 0) close(bolds, boldFrom)
             if (f and ITALICISED != 0 && --italic == 0 && f and BLOCK == 0) close(italics, italicFrom)
             if (f and BLOCK != 0) stack.removeAt(stack.lastIndex)
+        }
+
+        /**
+         * Where a printed page turned. Scanned books keep these, sometimes as an empty
+         * element and sometimes as "[pg 196]" in the middle of a sentence, and nobody
+         * listening wants to hear it.
+         */
+        private fun pageMark(el: Element, tag: String, classes: List<String>): Boolean =
+            "pagebreak" in el.attr("epub:type") || el.attr("role") == "doc-pagebreak" ||
+                classes.any { it in PAGE_CLASSES || it.endsWith("pageno") || it.endsWith("pagenum") } ||
+                (tag == "span" && el.childNodeSize() == 1 && PAGE_TEXT.matches(el.text().trim()))
+
+        /**
+         * A footnote's mark in the running text: a link into the book whose whole text is a
+         * number or a dagger, and whose target or class says it is a note. The same link at
+         * the head of a block is the note's own number in the list of notes, and stays. A
+         * bare number linked elsewhere ("see page 12") is prose and stays too.
+         */
+        private fun noteLink(el: Element, tag: String, classes: List<String>): Boolean {
+            if (tag != "a" || text.isBlank()) return false
+            val to = el.attr("href").substringAfter('#', "")
+            if (to.isEmpty()) return false
+            if (!NOTE_HINT.containsMatchIn(to) && classes.none { NOTE_HINT.containsMatchIn(it) }) return false
+            return LINK_MARK.matches(el.text().trim())
         }
 
         private fun close(into: ArrayList<IntRange>, from: Int) {
@@ -602,7 +627,13 @@ class Epub(file: File) : Closeable {
         )
         private val DROPPED = setOf("script", "style", "head", "title", "desc", "metadata", "math")
         /** What a superscript holds when it is a footnote's mark and not part of a word. */
-        private val NOTE_MARK = Regex("""[\[(]?(?:\d{1,3}|[*†‡§])[\])]?""")
+        private val NOTE_MARK = Regex("""[\[(]?(?:\d{1,3}|[*†‡§])[\])]?|[\[(]\d{4}[\])]""")
+        /** The same, as the text of a link: long books run past a thousand notes. */
+        private val LINK_MARK = Regex("""[\[(]?(?:\d{1,4}|[*†‡§]{1,3})[\])]?""")
+        private val NOTE_HINT = Regex("""foot|note|fn|annot""", RegexOption.IGNORE_CASE)
+        private val PAGE_CLASSES = setOf("pagenum", "pageno", "page-number", "pagenumber", "pagebreak",
+            "page-break", "tei-pb", "pb")
+        private val PAGE_TEXT = Regex("""[\[{(]\s*(?:pg|page|p)\.?\s*[0-9ivxlc]{1,5}\s*[\]})]""", RegexOption.IGNORE_CASE)
 
         private val RULE = Regex("""([^{}]+)\{([^{}]*)\}""")
         private val COMMENT = Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL)
