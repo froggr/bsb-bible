@@ -200,6 +200,20 @@ an entry. Render candidates with the CLI and judge by ear:
 number reading and abbreviations. Temperature is 0.3; the checkpoint's `config.json` says 0.8
 and is stale.
 
+**The emulator cannot tell you whether the voice keeps up.** It makes speech about fifteen
+times faster than it is heard, with the app open, at home or with the screen off, because it
+runs on the Mac's cores. A Pixel 9 measured 4.5x in the foreground and nobody has measured it
+in the background. When the model falls behind, the speech itself is unchanged and the gap
+*between* clauses grows, which is reported as "long pauses". Three log lines say what happened
+(`made` is the model's speed, `heard` the pace at the speaker, `stalled` a wait for a clause
+that was not ready), and `Pulse` keeps the same tally on the phone, split by whether the app
+was on screen, shown at the foot of Settings — ask for those two lines before guessing. To
+imitate a slowed phone on the emulator, starve the app as root:
+
+    adb shell 'su 0 sh -c "for i in 1 2 3 4; do nice -n -14 sh -c \"while :; do :; done\" & done; sleep 70; kill \$(jobs -p)"'
+
+There is no CFS quota in the emulator's kernel, so a cgroup limit is not available.
+
 ## Data
 
 **`app/app/src/main/assets/bible-reading.db` is a hand copy of `data/bible-reading.db`.**

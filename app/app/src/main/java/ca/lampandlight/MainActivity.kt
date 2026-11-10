@@ -110,6 +110,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        Pulse.onScreen = true
         bed?.resume()             // only does anything if the bed was actually paused
         // Look for a new build every time the app is come back to, not only on a cold
         // start. The activity survives rotation and configuration changes now, and it can
@@ -132,6 +133,7 @@ class MainActivity : ComponentActivity() {
         // Audio carries on when the phone is pocketed — a reading that stops on a walk is
         // no use, and neither is a bed that dies the moment the screen does. The foreground
         // service is what keeps Android from killing either. Nothing playing, nothing held.
+        Pulse.onScreen = false
     }
 
     override fun onDestroy() {

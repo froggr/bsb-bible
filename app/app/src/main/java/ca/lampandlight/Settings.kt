@@ -394,8 +394,17 @@ fun SettingsScreen(
                     "CC BY-SA 4.0, available free at tyndaleopenresources.com.\n" +
                     "Speech by Phonon (Gradium), Apache 2.0, generated on this phone.",
                 fontFamily = UiFont, fontSize = 11.sp, lineHeight = 19.sp, color = p.inkSoft,
-                modifier = Modifier.padding(bottom = 40.dp),
+                modifier = Modifier.padding(bottom = 18.dp),
             )
+            // How the voice has kept up on this phone since this build was installed. Here
+            // because a reading that drags with the screen off cannot be seen from a desk:
+            // the emulator never slows down, so the phone has to report it.
+            val pulse = remember { Pulse.lines() }
+            if (pulse.isNotEmpty()) Text(
+                pulse.joinToString("\n"),
+                fontFamily = UiFont, fontSize = 11.sp, lineHeight = 19.sp, color = p.inkSoft,
+            )
+            Spacer(Modifier.height(40.dp))
         }
     }
 }

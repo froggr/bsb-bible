@@ -37,6 +37,8 @@ import java.io.File
  */
 class Narrator(private val ctx: Context) {
 
+    init { Pulse.load(ctx) }
+
     var speaking by mutableStateOf(false); private set
     var verseIndex by mutableIntStateOf(-1); private set
     var wordIndex by mutableIntStateOf(-1); private set
@@ -272,8 +274,17 @@ class Narrator(private val ctx: Context) {
                         feed.close(e)
                     }
                 }
+                // Not counted before the first clause: that wait is the model opening,
+                // and the play button already shows it.
+                var idle = -1L
                 for ((step, pcm) in feed) {
                     if (!isActive) break
+                    // Time spent with nothing to say: the voice had finished a clause and
+                    // the next was not made yet. Silence the script did not ask for.
+                    if (idle >= 0) (android.os.SystemClock.elapsedRealtime() - idle).let {
+                        if (it >= Pulse.STALL_MS) Log.d(TAG, "stalled $it ms waiting for the next clause")
+                        Pulse.waited(it)
+                    }
                     val (i, clause) = step
                     val line = lines[i]
                     // An aside is read against the verse it belongs to, so the page keeps
@@ -283,6 +294,7 @@ class Narrator(private val ctx: Context) {
                     verseIndex = line.verse
                     wordSpan = if (line.aside) null else clause.range
                     sayOne(track, line, clause, pcm)
+                    idle = android.os.SystemClock.elapsedRealtime()
                 }
                 drain(track)
                 finished = isActive
@@ -293,6 +305,7 @@ class Narrator(private val ctx: Context) {
                 }
             } finally {
                 maker?.cancel()
+                Pulse.save(ctx)
                 live = null
                 lineIndex = -1
                 runCatching { track.stop(); track.flush(); track.release() }
@@ -455,8 +468,18 @@ class Narrator(private val ctx: Context) {
         // Debug-level, so the script can be read back from logcat when a device is the
         // only ear available: which clauses were made, and what split them.
         Log.d(TAG, "say [${clause.range}] ${clause.text}")
+        val began = android.os.SystemClock.elapsedRealtime()
         val parts = mutableListOf<FloatArray>()
         model.speak(speakable(clause.text)) { pcm -> parts += pcm.copyOf(); true }
+        // How far ahead of the voice the model is running. Under 1x the reading stalls
+        // between clauses however long the queue is, and that is heard as a long pause.
+        run {
+            val took = (android.os.SystemClock.elapsedRealtime() - began).coerceAtLeast(1L)
+            val made = parts.sumOf { it.size }
+            Log.d(TAG, "made %.2f s in %.2f s, %.1fx".format(
+                made / RATE.toFloat(), took / 1000f, made * 1000f / RATE / took))
+            Pulse.made(made / RATE.toFloat(), took / 1000f)
+        }
         val raw = FloatArray(parts.sumOf { it.size })
         var at = 0
         parts.forEach { System.arraycopy(it, 0, raw, at, it.size); at += it.size }

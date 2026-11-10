@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 
 /**
  * Keeps the reading alive when the screen goes off.
@@ -35,7 +36,27 @@ class ReadingService : Service() {
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Reading"
         val detail = intent?.getStringExtra(EXTRA_DETAIL) ?: ""
         startForeground(ID, build(title, detail))
+        // The voice is made on this phone a clause ahead of where it is heard, so the
+        // processor has to stay up between clauses, not only while sound is leaving the
+        // speaker. Playing audio keeps it up only as long as there is audio to play: one
+        // clause that arrives late lets the phone doze, and then the next is later still.
+        // Asked for again on every start, which each new chapter is, so the limit is on one
+        // chapter and not on the reading; the limit is there so a fault cannot hold it for ever.
+        runCatching {
+            val lock = awake ?: getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "lampandlight:reading")
+                .apply { setReferenceCounted(false) }.also { awake = it }
+            lock.acquire(3 * 60 * 60 * 1000L)
+        }
         return START_STICKY
+    }
+
+    private var awake: PowerManager.WakeLock? = null
+
+    override fun onDestroy() {
+        runCatching { awake?.release() }
+        awake = null
+        super.onDestroy()
     }
 
     private fun build(title: String, detail: String): Notification {
