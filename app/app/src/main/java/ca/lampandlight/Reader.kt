@@ -966,9 +966,7 @@ internal fun PlayerBar(
                     Setting(
                         label = "Pace",
                         value = "${"%.2f".format(prefs.rate).trimEnd('0').trimEnd('.')}×",
-                        // Phonon's rate is fixed when the audio track is built, so a change
-                        // lands on the next read rather than the sentence being spoken.
-                        detail = if (narrator.speaking) "from the next read" else null,
+                        detail = null,
                         on = open == "pace",
                         onTap = { open = if (open == "pace") null else "pace" },
                     )

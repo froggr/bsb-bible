@@ -62,8 +62,16 @@ class Narrator(private val ctx: Context) {
      *  is interleaved, because several lines can belong to one verse. */
     private var lineIndex = -1
 
-    /** 0.9 to 1.4; the speed people set once and leave. */
-    var rate by mutableStateOf(1.0f)
+    /**
+     * 0.9 to 1.4; the speed people set once and leave. Setting it reaches the voice at once:
+     * until 0.46 it was read only when a track was built, so a change made while listening
+     * did nothing until the reading was stopped and started again, which is not what a
+     * speed control that appears to do nothing invites anyone to try.
+     */
+    var rate: Float
+        get() = pace
+        set(value) { pace = value; retime() }
+    private var pace by mutableStateOf(1.0f)
 
     /**
      * How much the voice is allowed to vary, 0 to 1. Set per voice: see [Voices.warmth].
@@ -78,6 +86,16 @@ class Narrator(private val ctx: Context) {
 
     /** How fast the audio plays, pitch kept: the voice's own tempo under the reader's pace. */
     private fun speed(): Float = rate * Voices.tempo(voice)
+
+    /**
+     * Put the current speed on the track that is sounding. Safe mid-clause: the playback
+     * head counts source frames whatever the speed, so the highlight keeps its place.
+     */
+    private fun retime() {
+        live?.let { t ->
+            runCatching { t.playbackParams = PlaybackParams().setSpeed(speed()).setPitch(1f) }
+        }
+    }
 
     /**
      * Called, on the main thread, when a chapter has been read to its end — not when it
@@ -156,8 +174,9 @@ class Narrator(private val ctx: Context) {
     fun chooseVoice(name: String) {
         voice = name
         runCatching { tts?.setVoice(name) }
-        // Each voice has its own temperature; the tempo lands with the next track built.
+        // Each voice has its own temperature, and its own tempo.
         runCatching { tts?.setTemperature(warmth) }
+        retime()
     }
 
     /**
@@ -482,6 +501,7 @@ class Narrator(private val ctx: Context) {
         // between clauses — that is what keeps the reading gapless — so the head keeps
         // counting and each clause has to be measured from its own starting mark.
         val base = written
+        val began = android.os.SystemClock.elapsedRealtime()
 
         // Where speech actually starts. render() has trimmed the model's lead-in, so this
         // is the short run-in it kept — found rather than assumed all the same.
@@ -539,6 +559,11 @@ class Narrator(private val ctx: Context) {
                 if (head >= pcm.size) break
                 kotlinx.coroutines.delay(20); spins++
             }
+            // The pace as it was heard, not as it was asked for: audio seconds over wall
+            // seconds. This is how a speed change is checked on a device with no ear.
+            val took = (android.os.SystemClock.elapsedRealtime() - began).coerceAtLeast(1L)
+            Log.d(TAG, "heard %.2f s in %.2f s, %.2fx".format(
+                pcm.size / RATE.toFloat(), took / 1000f, pcm.size * 1000f / RATE / took))
         } finally {
             watcher.cancel()
         }
