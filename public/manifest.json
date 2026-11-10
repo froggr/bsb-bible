@@ -1,5 +1,5 @@
 {
- "generated": 1794162680,
+ "generated": 1794313396,
  "layers": {
   "bible-study.db": {
    "url": "/data/bible-study.db.gz",
@@ -14,9 +14,9 @@
  },
  "app": {
   "url": "/app.apk",
-  "bytes": 33484805,
-  "version": "0.42",
-  "sha256": "7ab1ff4c29fc3be5a332c45f640a23086594db112b66e3bd2e3ab9548c32ee97"
+  "bytes": 33501189,
+  "version": "0.43",
+  "sha256": "0e8196969b416b195dfea1e89e9bf4c31dc709ff3a0acdda2167bb4e0ac5cfbb"
  },
  "beds": {
   "evening": {

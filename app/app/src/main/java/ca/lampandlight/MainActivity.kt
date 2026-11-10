@@ -165,6 +165,7 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
     // The last bookmark tap, kept just long enough to offer it back.
     var undo by remember { mutableStateOf<Triple<VerseId, MarkColor?, Boolean>?>(null) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
 
 
     // Study material is read off disk, which must not happen on the scroll thread; the
@@ -180,15 +181,22 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
         bed.restore(prefs.bed.ifBlank { null }, prefs.bedLevel)
         narrator.rate = prefs.rate
     }
+    // Open at a verse. A reference with a range ("Philippians 2:3-4") lands on its first
+    // verse with the whole span selected, so it can be marked, noted or copied at once.
+    val land: (VerseId, VerseId?) -> Unit = { at, to ->
+        state.go(at.book, at.chapter, at = at.verse)
+        if (to != null && to > at) { anchor = at; selection = setOf(at, to) }
+        else { anchor = null; selection = emptySet() }
+    }
     // A passage asked for from outside — a widget, a shortcut, a link — once the reader
     // is ready to show it. See [Deeplink] for the forms accepted.
     LaunchedEffect(MainActivity.arriving) {
         val intent = MainActivity.arriving ?: return@LaunchedEffect
         MainActivity.arriving = null
-        val v = Deeplink.verseOf(intent, bible.books) ?: return@LaunchedEffect
+        val landing = Deeplink.verseOf(intent, bible.books) ?: return@LaunchedEffect
         narrator.reset()
         screen = "read"
-        state.go(v.book, v.chapter, at = v.verse)
+        land(landing.at, landing.to)
     }
     // A chapter read to its end runs on into the next, unless asked not to. The next
     // chapter's study material comes off disk, so in study mode the voice waits for it
@@ -356,6 +364,25 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
                     if (lo > 0) noting = lo to hi
                     selection = emptySet()
                 },
+                onCopy = {
+                    val picked = state.verses.filter { it.id in lo..hi }
+                    val book = bible.books.getOrNull(lo.book - 1)
+                    if (picked.isNotEmpty() && book != null) {
+                        val first = picked.first().id.verse
+                        val last = picked.last().id.verse
+                        val ref = "${book.name} ${lo.chapter}:$first" +
+                            if (last > first) "\u2013$last" else ""
+                        // Verse numbers only when there is more than one verse to tell apart.
+                        val body = if (picked.size == 1) picked[0].text
+                            else picked.joinToString(" ") { "${it.id.verse} ${it.text}" }
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString("$ref (BSB)\n$body"))
+                        // Android 13 and up show their own "Copied" overlay.
+                        if (Build.VERSION.SDK_INT < 33) {
+                            android.widget.Toast.makeText(ctx, "Copied $ref", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    selection = emptySet()
+                },
                 onDone = { selection = emptySet() },
             )
         }
@@ -393,9 +420,7 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
     when (screen) {
         "search" -> SearchScreen(
             bible = bible,
-            onOpen = { v ->
-                screen = "read"; narrator.reset(); state.go(v.book, v.chapter, at = v.verse)
-            },
+            onOpen = { v, to -> screen = "read"; narrator.reset(); land(v, to) },
             onClose = { screen = "read" },
         )
         "menu" -> MenuScreen(
@@ -495,23 +520,29 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
     }
 }
 
-/** Shown while verses are selected: pick a colour, clear, or dismiss. */
+/**
+ * Shown while verses are selected: pick a colour, note, copy, clear, or dismiss.
+ *
+ * Two lines: the count and the colours, then the actions. On one line the four actions
+ * pushed Done off the edge of a narrow phone.
+ */
 @Composable
 private fun MarkBar(
     count: Int,
     onPick: (MarkColor) -> Unit,
     onClear: () -> Unit,
     onNote: () -> Unit,
+    onCopy: () -> Unit,
     onDone: () -> Unit,
 ) {
     val p = LocalPalette.current
     Surface(color = p.sunk) {
-        androidx.compose.foundation.layout.Column {
+        androidx.compose.foundation.layout.Column(
+            Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars),
+        ) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(p.rule))
             Row(
-                Modifier.fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.navigationBars)
-                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -519,24 +550,34 @@ private fun MarkBar(
                     fontFamily = UiFont, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                     color = p.inkSoft,
                 )
-                Spacer(Modifier.width(16.dp))
+                Spacer(Modifier.weight(1f))
                 MarkColor.entries.forEach { c ->
+                    Spacer(Modifier.width(9.dp))
                     Box(
                         Modifier.size(34.dp).clip(CircleShape)
                             .background(c.color(p.dark))
                             .clickable { onPick(c) }
                     )
-                    Spacer(Modifier.width(9.dp))
                 }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Clear", fontFamily = UiFont, fontSize = 12.sp, color = p.inkSoft,
+                    modifier = Modifier.clickable { onClear() }.padding(8.dp),
+                )
                 Spacer(Modifier.weight(1f))
+                Text(
+                    "Copy", fontFamily = UiFont, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    color = p.ink,
+                    modifier = Modifier.clickable { onCopy() }.padding(8.dp),
+                )
                 Text(
                     "Note", fontFamily = UiFont, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                     color = p.ink,
                     modifier = Modifier.clickable { onNote() }.padding(8.dp),
-                )
-                Text(
-                    "Clear", fontFamily = UiFont, fontSize = 12.sp, color = p.inkSoft,
-                    modifier = Modifier.clickable { onClear() }.padding(8.dp),
                 )
                 Text(
                     "Done", fontFamily = UiFont, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,

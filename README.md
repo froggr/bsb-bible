@@ -27,8 +27,9 @@ Needs Android 10 or newer, and about 120 MB free once the voice is downloaded.
   reading with the screen off, and carries on into the next chapter unless you tell it to stop.
   Fourteen voices to choose from. Optional quiet instrumental music can play underneath.
 - **Marking is fast.** Tap a verse number to select the verse; tap another and everything
-  between is selected. Then pick a colour or write a note, and it applies to the whole span.
-  Press and drag works too. Built to be usable during a sermon.
+  between is selected. Then pick a colour, write a note, or copy the verses with their
+  reference, and it applies to the whole span. Press and drag works too. Built to be usable
+  during a sermon.
 - **Study mode.** Commentary, cross-references and footnotes appear between the verses rather
   than behind a tap, so you can study while you read. Scripture stays the dominant text. A
   commentary paragraph on a run of verses shows once, under the last of them, with a bracket
@@ -283,9 +284,10 @@ app — can open it on a verse:
 bsb://open?ref=John+3:16
 ```
 
-`ref` is whatever the search box accepts: `jn3:16`, `1 cor 13`, `ps 23:4`, `rev`. The same
-reference can be sent as a string extra named `ref` on an explicit intent to
-`ca.lampandlight/.MainActivity`. From a shell:
+`ref` is whatever the search box accepts: `jn3:16`, `1 cor 13`, `ps 23:4`, `rev`. A range
+within a chapter, `Philippians 2:3-4`, lands on the first verse with the whole span selected,
+ready to mark, note or copy. The same reference can be sent as a string extra named `ref` on
+an explicit intent to `ca.lampandlight/.MainActivity`. From a shell:
 
 ```sh
 adb shell am start -a android.intent.action.VIEW -d "bsb://open?ref=John%203:16"
@@ -299,7 +301,7 @@ choice:
 | | |
 |---|---|
 | `https://www.biblegateway.com/passage/?search=John+3:16` | the `search` query |
-| `https://www.bible.com/bible/59/JHN.3.16` | YouVersion's three-letter book codes |
+| `https://www.bible.com/bible/59/JHN.3.16` | YouVersion's three-letter book codes (`PHP.2.3-4` for a range) |
 | `https://biblehub.com/john/3-16.htm` | book, chapter-verse |
 
 If the app is already open it turns to the passage rather than starting a second copy

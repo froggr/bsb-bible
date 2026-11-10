@@ -39,7 +39,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SearchScreen(
     bible: Bible,
-    onOpen: (VerseId) -> Unit,
+    /** Open at a verse; a reference typed as a range ("phil 2:3-4") also says where it ends. */
+    onOpen: (VerseId, VerseId?) -> Unit,
     onClose: () -> Unit,
 ) {
     val p = LocalPalette.current
@@ -123,7 +124,7 @@ fun SearchScreen(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clickable { onOpen(hit.id) }
+                        .clickable { onOpen(hit.id, hit.endId) }
                         .padding(horizontal = 18.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -161,7 +162,7 @@ fun SearchScreen(
                         Column(
                             Modifier
                                 .fillMaxWidth()
-                                .clickable { onOpen(id) }
+                                .clickable { onOpen(id, null) }
                                 .padding(horizontal = 18.dp, vertical = 13.dp),
                         ) {
                             Text(

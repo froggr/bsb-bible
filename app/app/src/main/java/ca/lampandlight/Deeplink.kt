@@ -22,8 +22,14 @@ import android.net.Uri
  */
 object Deeplink {
 
+    /**
+     * Where a link lands: a verse, and for a range ("Philippians 2:3-4") the verse it runs
+     * to, which the page selects so the span can be marked, noted or copied at once.
+     */
+    data class Landing(val at: VerseId, val to: VerseId? = null)
+
     /** The verse an intent asks for, or null when it asks for none. */
-    fun verseOf(intent: Intent?, books: List<Book>): VerseId? {
+    fun verseOf(intent: Intent?, books: List<Book>): Landing? {
         if (intent == null) return null
         intent.getStringExtra("ref")?.let { return byReference(it, books) }
         val uri = intent.data ?: return null
@@ -34,13 +40,15 @@ object Deeplink {
             "biblegateway.com" in host ->
                 byReference(uri.getQueryParameter("search") ?: "", books)
             "bible.com" in host -> {
-                // /bible/<version>/JHN.3.16[.BSB]
+                // /bible/<version>/JHN.3.16[.BSB], or PHP.2.3-4 for a range
                 val seg = uri.pathSegments.getOrNull(2) ?: return null
                 val parts = seg.split('.')
                 val book = USFM[parts.getOrNull(0)?.uppercase()] ?: return null
                 val chapter = parts.getOrNull(1)?.toIntOrNull() ?: 1
-                val verse = parts.getOrNull(2)?.toIntOrNull() ?: 1
-                verseId(book, chapter, verse)
+                val span = parts.getOrNull(2)?.split('-') ?: emptyList()
+                val verse = span.getOrNull(0)?.toIntOrNull() ?: 1
+                val end = span.getOrNull(1)?.toIntOrNull()?.takeIf { it > verse }
+                Landing(verseId(book, chapter, verse), end?.let { verseId(book, chapter, it) })
             }
             "biblehub.com" in host -> {
                 // /john/3-16.htm, /1_john/3-16.htm, /psalms/23.htm
@@ -52,13 +60,14 @@ object Deeplink {
         }
     }
 
-    private fun byReference(ref: String, books: List<Book>): VerseId? {
+    private fun byReference(ref: String, books: List<Book>): Landing? {
         val text = ref.replace('+', ' ').trim()
         if (text.isEmpty()) return null
         val hits = Reference.parse(text, books)
         // The search box offers every candidate for an ambiguous prefix; a link has to
         // choose, and takes the best — which is the exact or aliased one when there is one.
-        return hits.firstOrNull()?.id
+        val hit = hits.firstOrNull() ?: return null
+        return Landing(hit.id, hit.endId)
     }
 
     /** The three-letter book codes YouVersion URLs use, in canon order. */

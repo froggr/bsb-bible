@@ -21,10 +21,15 @@ object Reference {
         val verse: Int?,
         /** True when the typed name matched this book's full name, not just a prefix. */
         val exact: Boolean,
+        /** The last verse of a range ("2:3-4"), when one was given and it is past [verse]. */
+        val verseEnd: Int? = null,
     ) {
         val id: VerseId get() = book.id * 1_000_000 + chapter * 1_000 + (verse ?: 1)
+        /** The far end of the range, or null for a single verse or a whole chapter. */
+        val endId: VerseId? get() = verseEnd?.let { book.id * 1_000_000 + chapter * 1_000 + it }
         val label: String get() =
-            "${book.name} $chapter" + if (verse != null) ":$verse" else ""
+            "${book.name} $chapter" + (if (verse != null) ":$verse" else "") +
+                (if (verseEnd != null) "\u2013$verseEnd" else "")
     }
 
     /**
@@ -92,10 +97,10 @@ object Reference {
      *
      * The leading digit of "1cor" belongs to the book, so the book part is taken as an
      * optional leading digit plus the letters that follow; numbers start at the first digit
-     * after a letter.
+     * after a letter. A range of verses may follow the verse: "2:3-4", "2:3–4".
      */
     private val SHAPE = Regex(
-        """^\s*([1-3])?\s*([a-z]+)\s*\.?\s*(\d{1,3})?\s*[:.\s]?\s*(\d{1,3})?\s*$""",
+        """^\s*([1-3])?\s*([a-z]+)\s*\.?\s*(\d{1,3})?\s*[:.\s]?\s*(\d{1,3})?(?:\s*[-\u2013]\s*(\d{1,3}))?\s*$""",
         RegexOption.IGNORE_CASE,
     )
 
@@ -104,7 +109,7 @@ object Reference {
      * splitting a leading "i" off eagerly turns "isa40" into 1 Samuel 40.
      */
     private val ROMAN = Regex(
-        """^\s*(i{1,3})\s*([a-z]+)\s*\.?\s*(\d{1,3})?\s*[:.\s]?\s*(\d{1,3})?\s*$""",
+        """^\s*(i{1,3})\s*([a-z]+)\s*\.?\s*(\d{1,3})?\s*[:.\s]?\s*(\d{1,3})?(?:\s*[-\u2013]\s*(\d{1,3}))?\s*$""",
         RegexOption.IGNORE_CASE,
     )
 
@@ -121,7 +126,7 @@ object Reference {
 
     private fun resolve(input: String, books: List<Book>, roman: Boolean): List<Hit> {
         val m = (if (roman) ROMAN else SHAPE).find(input.trim()) ?: return emptyList()
-        val (prefix, letters, chText, vText) = m.destructured
+        val (prefix, letters, chText, vText, endText) = m.destructured
         if (letters.isEmpty()) return emptyList()
 
         val ordinal = if (!roman) prefix else when (prefix.lowercase()) {
@@ -134,6 +139,8 @@ object Reference {
 
         val chapter = chText.toIntOrNull()
         val verse = vText.toIntOrNull()
+        // "3-4" is a range; "4-3" and "3-3" are a verse with a slip after it.
+        val verseEnd = endText.toIntOrNull()?.takeIf { verse != null && it > verse }
 
         // An alias is a deliberate spelling, so it wins over a prefix match.
         val aliased = ALIASES[typed]
@@ -150,7 +157,7 @@ object Reference {
             // A chapter beyond the book is not this book; "1co20" should not offer 1 Cor.
             val ch = (chapter ?: 1).coerceAtLeast(1)
             if (ch > b.chapters) null
-            else Hit(b, ch, verse, exact = squash(b.name) == typed || aliased != null)
+            else Hit(b, ch, verse, exact = squash(b.name) == typed || aliased != null, verseEnd = verseEnd)
         }.sortedWith(compareByDescending<Hit> { it.exact }.thenBy { it.book.id })
     }
 
