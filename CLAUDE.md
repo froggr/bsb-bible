@@ -214,6 +214,39 @@ imitate a slowed phone on the emulator, starve the app as root:
 
 There is no CFS quota in the emulator's kernel, so a cgroup limit is not available.
 
+**The model does its work on threads it starts itself, two per sentence, not on the thread
+that calls it.** The caller only waits and takes the audio callbacks. So the caller's CPU time
+says nothing (it read 0%), and the measure is `/proc/self/task/<tid>/schedstat` of the threads
+named `voice` other than the caller, read inside the callback: nanoseconds on a core, then
+nanoseconds waiting for one. Those threads inherit the caller's name, priority and cores, which
+is why pinning the voice thread before each clause places them. The persistent pool is
+`xn-worker-{i}`, its width is fixed at first use from `RAYON_NUM_THREADS`, and every step
+waits for every worker, so **the voice runs at the pace of its slowest thread**.
+
+**A Pixel 9 off screen has three fast cores, not four.** From `init.zumapro.soc.rc`:
+`top-app` is cores 0-7, `foreground` 0-6, `background` 0-3; cores 0-3 are small, 4-6 middle,
+7 large. A pool four wide then has one thread on a small core. `Cores` sizes the pool to the
+fast cores left off screen and re-pins before every clause, because a move between those sets
+resets where a thread may run. **This mechanism is read off files, not measured on a phone**;
+0.47 shipped on it without a measurement. The two "Reading aloud" lines at the foot of Settings
+are the measurement: ask for them.
+
+**Never stop and restart the reading service across a chapter.** From the background,
+`startForegroundService()` throws `ForegroundServiceStartNotAllowedException` on Android 12 and
+later unless the service is already up. 0.46 let `speaking` go false for a moment at every
+chapter end, the service stopped, and the restart crashed the app with the screen locked. A
+playing bed hid it by keeping the service up. `Narrator.carrying` covers the gap, and
+`ReadingService.start()` only replaces the notification when the service is running. **Test a
+chapter end with a real book, music None and the screen locked, on Android 12 or later**; a
+two-chapter sample had not shown the crash.
+
+**Android replays the intent a task was first started with** when the app has been cleared
+from memory, or has crashed, and is reopened from Recents. A passage link, the widget or an
+epub tap then arrives a second time. `onCreate` ignores the intent when
+`savedInstanceState != null` or `FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY` is set. To test: start
+with `am start -a android.intent.action.VIEW -d "bsb://open?ref=John+3:16"`, open a book, go
+home, `am kill ca.lampandlight`, return through Recents.
+
 ## Data
 
 **`app/app/src/main/assets/bible-reading.db` is a hand copy of `data/bible-reading.db`.**

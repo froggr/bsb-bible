@@ -440,6 +440,13 @@ Phonon 31M English, Apache 2.0, ~65 MB, CPU. The Android path is a C FFI library
   phones; build with `ARM64_FEATURES=` for those.
 - Set `RAYON_NUM_THREADS` before constructing `PhononTTS`. One-per-core is usually wrong on
   big.LITTLE.
+- The pool's width is fixed the first time the model runs, and every step waits for every
+  worker. A thread on a slow core therefore slows the whole voice. `Cores.kt` chooses the width
+  from the fast cores the phone leaves an app that is off screen, and keeps the model's threads
+  on the fastest cores allowed. The reasoning is in that file and has not been measured on a
+  phone.
+- The generating is done on threads the library starts for each sentence, not on the caller.
+  Time the caller and you measure nothing.
 - Don't ship the model in the APK; download on first run.
 - QNN/NPU is Qualcomm-only and irrelevant on a Pixel's Tensor G4 — the CPU path is the
   tested one anyway.

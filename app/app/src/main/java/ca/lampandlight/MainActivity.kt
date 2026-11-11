@@ -47,9 +47,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        latest = this
         enableEdgeToEdge()
         // Opened at a passage from outside: held until the Bible is open, then consumed.
-        arriving = intent
+        // Once only. Android keeps the intent a task was started with and hands it over
+        // again whenever the activity has to be made afresh, so a reading begun from the
+        // verse of the day, then left for a book, came back at the verse of the day every
+        // time the app had been cleared from memory in between.
+        val replayed = savedInstanceState != null ||
+            intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        arriving = intent.takeIf { !replayed }
         setContent {
             var ready by remember { mutableStateOf<Bible?>(null) }
             var failed by remember { mutableStateOf<String?>(null) }
@@ -110,7 +117,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        Pulse.onScreen = true
+        // Counted, not set. Android can make a second copy of the activity before it has
+        // finished with the first, and the first one's onStop then arrives after the
+        // second one's onStart: a plain flag ended up saying "away" with the app in hand.
+        Pulse.onScreen = ++started > 0
         bed?.resume()             // only does anything if the bed was actually paused
         // Look for a new build every time the app is come back to, not only on a cold
         // start. The activity survives rotation and configuration changes now, and it can
@@ -124,6 +134,9 @@ class MainActivity : ComponentActivity() {
         var visits by mutableIntStateOf(0)
             private set
 
+        private var started = 0
+        private var latest: MainActivity? = null
+
         /** An intent that may name a passage, waiting for the reader to take it. */
         var arriving by mutableStateOf<Intent?>(null)
     }
@@ -133,13 +146,19 @@ class MainActivity : ComponentActivity() {
         // Audio carries on when the phone is pocketed — a reading that stops on a walk is
         // no use, and neither is a bed that dies the moment the screen does. The foreground
         // service is what keeps Android from killing either. Nothing playing, nothing held.
-        Pulse.onScreen = false
+        started = (started - 1).coerceAtLeast(0)
+        Pulse.onScreen = started > 0
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        ReadingService.stop(this)
-        ReadingService.hold = null
+        // Only if no newer copy of the activity has taken over: its reading is not this
+        // one's to end.
+        if (latest === this) {
+            latest = null
+            ReadingService.stop(this)
+            ReadingService.hold = null
+        }
         narrator?.close()
         bed?.pause()
         bible?.close()
@@ -202,24 +221,29 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
         if (opening) return@open
         opening = true
         scope.launch {
-            val s = BookSession.open(id, library, bible)
-            if (s == null) {
-                val name = library.volume(id)?.title ?: "That book"
-                library.report = Library.Report(0, 0, listOf(name to "could not be opened"))
-                if (prefs.openBook == id) prefs.openBook = ""
-                if (screen == "book") screen = "books"
-            } else {
-                val v = library.volume(id)
-                s.go(v?.section ?: 0, v?.block ?: 0)
-                narrator.reset()
-                session?.close()
-                session = s
-                library.touch(id)
-                prefs.openBook = id
-                crumbAt = -1
-                screen = "book"
+            try {
+                val s = BookSession.open(id, library, bible)
+                if (s == null) {
+                    val name = library.volume(id)?.title ?: "That book"
+                    library.report = Library.Report(0, 0, listOf(name to "could not be opened"))
+                    if (prefs.openBook == id) prefs.openBook = ""
+                    if (screen == "book") screen = "books"
+                } else {
+                    val v = library.volume(id)
+                    s.go(v?.section ?: 0, v?.block ?: 0)
+                    narrator.reset()
+                    session?.close()
+                    session = s
+                    library.touch(id)
+                    prefs.openBook = id
+                    crumbAt = -1
+                    screen = "book"
+                }
+            } finally {
+                // Whatever happened: a book that failed part-way must not leave every
+                // other book unopenable until the app is restarted.
+                opening = false
             }
-            opening = false
         }
     }
     // Back to the shelf: the book is shut, and the place it was shut at is kept by the page
@@ -279,20 +303,34 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
     LaunchedEffect(Unit) {
         narrator.onChapterEnd = {
             val s = session
-            if (screen == "book" && s != null) {
-                if (prefs.readOn && s.hasNext) scope.launch {
-                    s.go(s.index + 1)
-                    narrator.speak(s.lines(), 0)
+            // What to read next, if anything. Fetching it takes a moment, and for that
+            // moment the narrator is not speaking but is not finished either: it says so
+            // ([Narrator.carrying]) until told here that the matter is settled, so that
+            // nothing lets go of the reading in between.
+            val next: (suspend () -> List<Narrator.Line>)? = when {
+                !prefs.readOn -> null
+                screen == "book" && s != null ->
+                    if (!s.hasNext) null else suspend { s.go(s.index + 1); s.lines() }
+                else -> {
+                    val was = state.book to state.chapter
+                    state.nextChapter()
+                    // Revelation 22 has no next chapter: nextChapter() leaves us where we
+                    // are, and reading it again would be a loop.
+                    if (was == (state.book to state.chapter)) null else suspend {
+                        var waited = 0
+                        while (state.studyLoading && waited < 40) { kotlinx.coroutines.delay(100); waited++ }
+                        state.narrationLines()
+                    }
                 }
-            } else if (prefs.readOn) {
-                val was = state.book to state.chapter
-                state.nextChapter()
-                // Revelation 22 has no next chapter: nextChapter() leaves us where we are,
-                // and reading it again would be a loop.
-                if (was != (state.book to state.chapter)) scope.launch {
-                    var waited = 0
-                    while (state.studyLoading && waited < 40) { kotlinx.coroutines.delay(100); waited++ }
-                    narrator.speak(state.narrationLines(), 0)
+            }
+            if (next == null) narrator.settled()
+            else scope.launch {
+                try {
+                    val lines = next()
+                    // Still wanted: Stop pressed during the wait means stop.
+                    if (narrator.carrying) narrator.speak(lines, 0)
+                } finally {
+                    narrator.settled()
                 }
             }
         }
@@ -317,22 +355,26 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
     // The notification is what lets the reading survive the screen going off, and the only
     // way to stop it without unlocking.
     val heard = session?.takeIf { screen == "book" }
-    LaunchedEffect(narrator.speaking, bed.playing, state.book, state.chapter, heard, heard?.index) {
-        if (narrator.speaking || bed.playing) {
+    // Between two chapters the voice is silent and the reading is not over. The service
+    // must not be let go for that moment: Android will not start one again from behind a
+    // locked screen, and trying to is what ended the reading at the first chapter end.
+    val voiced = narrator.speaking || narrator.carrying
+    LaunchedEffect(voiced, bed.playing, state.book, state.chapter, heard, heard?.index) {
+        if (voiced || bed.playing) {
             ReadingService.hold = { narrator.stop(); bed.pause() }
             ReadingService.start(
                 ctx,
                 // Music on its own is not "reading Psalm 23"; say what is actually sounding.
-                if (!narrator.speaking) "Music"
+                if (!voiced) "Music"
                 else if (heard != null) heard.title
                 else bible.reference(verseId(state.book, state.chapter, 1)).substringBeforeLast(":"),
                 buildString {
-                    if (narrator.speaking && heard != null) {
+                    if (voiced && heard != null) {
                         val at = heard.section
                         val name = at?.title?.replace('\n', ' ')?.ifBlank { null } ?: at?.label
                         if (name != null) append(name).append(" \u00b7 ")
                     }
-                    if (narrator.speaking) append(narrator.voice)
+                    if (voiced) append(narrator.voice)
                     // What is actually sounding — under rotation the bed changes while the
                     // notification stays up.
                     (bed.sounding ?: bed.track)?.let {

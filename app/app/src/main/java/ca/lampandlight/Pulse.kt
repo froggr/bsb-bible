@@ -14,8 +14,11 @@ import android.content.Context
  * screen is doing, so it cannot show this; only the phone can, and this is where it says so.
  *
  * Two numbers per side: how fast speech was made against how fast it is heard, and how often
- * and how long the voice was left waiting. Kept across launches, started again with each
- * version so a new build is judged on its own readings.
+ * and how long the voice was left waiting. Then the reason, as far as the phone will give
+ * it: which cores the model was on out of those the app was allowed (see [Cores]), how much
+ * of the time it stood ready to run with no core to run on, and how near full speed those
+ * cores were. Kept across launches, started again with each version so a new
+ * build is judged on its own readings.
  */
 object Pulse {
     /** Whether the app is what the reader is looking at. Set by the activity. */
@@ -28,6 +31,11 @@ object Pulse {
         var waits = 0       // times the voice ran out of things to say
         var waited = 0L     // the silence that cost, ms
         var longest = 0L
+        var ran = 0f        // seconds the thread making it had a core
+        var queued = 0f     // seconds it stood ready to run and had none
+        var clock = 0f      // how near full speed its cores were, summed over [clocked] looks
+        var clocked = 0
+        var cores = ""      // "3 threads on cores 4-6 of 0-6", as last seen
     }
 
     private val shown = Side("shown")
@@ -37,12 +45,28 @@ object Pulse {
     /** A wait shorter than this is a breath, not a stall. */
     const val STALL_MS = 250L
 
-    @Synchronized fun made(audio: Float, work: Float) {
+    /**
+     * One clause made: [audio] seconds of speech in [work] seconds, during which the thread
+     * making it had a core for [ran] seconds and wanted one for [queued] more.
+     * [clock] is [Cores.clock] as the clause ended.
+     */
+    @Synchronized fun made(
+        audio: Float, work: Float, ran: Float = 0f, queued: Float = 0f, clock: Float? = null,
+    ) {
         if (audio < 1f || work <= 0f) return     // a two-word clause times the clock, not the model
         val s = side()
         s.audio += audio; s.work += work
+        s.ran += ran.coerceAtLeast(0f); s.queued += queued.coerceAtLeast(0f)
+        if (clock != null) { s.clock += clock; s.clocked++ }
         val x = audio / work
         if (s.slowest == 0f || x < s.slowest) s.slowest = x
+    }
+
+    /** Where the model is running: [threads] of them on [chosen], out of [allowed]. */
+    @Synchronized fun on(threads: Int, chosen: Set<Int>, allowed: Set<Int>, held: Boolean) {
+        if (allowed.isEmpty()) return
+        side().cores = "$threads threads on cores ${Cores.span(chosen)} of ${Cores.span(allowed)}" +
+            if (held) "" else ", not held there"
     }
 
     @Synchronized fun waited(ms: Long) {
@@ -62,7 +86,13 @@ object Pulse {
             1 -> "left waiting once, ${span(s.waited)}"
             else -> "left waiting ${s.waits} times, ${span(s.waited)} in all, longest ${span(s.longest)}"
         }
-        "$name: voice made at $speed, over ${span((s.audio * 1000).toLong())} · $waits"
+        val where = buildList {
+            if (s.cores.isNotEmpty()) add(s.cores)
+            if (s.ran + s.queued > 0f)
+                add("kept waiting for a core ${(100 * s.queued / (s.ran + s.queued)).toInt()}% of the time")
+            if (s.clocked > 0) add("cores at ${(100 * s.clock / s.clocked).toInt()}% of full speed")
+        }.joinToString(", ")
+        "$name: voice made at $speed, over ${span((s.audio * 1000).toLong())} · $waits · $where"
     }
 
     private fun span(ms: Long): String {
@@ -81,6 +111,9 @@ object Pulse {
             s.audio = sp.getFloat("${s.key}.audio", 0f); s.work = sp.getFloat("${s.key}.work", 0f)
             s.slowest = sp.getFloat("${s.key}.slowest", 0f); s.waits = sp.getInt("${s.key}.waits", 0)
             s.waited = sp.getLong("${s.key}.waited", 0L); s.longest = sp.getLong("${s.key}.longest", 0L)
+            s.ran = sp.getFloat("${s.key}.ran", 0f); s.queued = sp.getFloat("${s.key}.queued", 0f)
+            s.clock = sp.getFloat("${s.key}.clock", 0f)
+            s.clocked = sp.getInt("${s.key}.clocked", 0); s.cores = sp.getString("${s.key}.cores", "") ?: ""
         }
     }
 
@@ -91,6 +124,9 @@ object Pulse {
             e.putFloat("${s.key}.audio", s.audio).putFloat("${s.key}.work", s.work)
                 .putFloat("${s.key}.slowest", s.slowest).putInt("${s.key}.waits", s.waits)
                 .putLong("${s.key}.waited", s.waited).putLong("${s.key}.longest", s.longest)
+                .putFloat("${s.key}.ran", s.ran).putFloat("${s.key}.queued", s.queued)
+                .putFloat("${s.key}.clock", s.clock)
+                .putInt("${s.key}.clocked", s.clocked).putString("${s.key}.cores", s.cores)
         }
         e.apply()
     }

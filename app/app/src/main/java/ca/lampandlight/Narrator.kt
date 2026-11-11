@@ -8,6 +8,8 @@ import android.media.AudioTrack
 import android.media.PlaybackParams
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
+import android.os.SystemClock
 import android.system.Os
 import android.util.Log
 import androidx.compose.runtime.getValue
@@ -17,12 +19,15 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Reads scripture aloud and says which word is sounding.
@@ -40,6 +45,21 @@ class Narrator(private val ctx: Context) {
     init { Pulse.load(ctx) }
 
     var speaking by mutableStateOf(false); private set
+
+    /**
+     * True from the last word of a chapter until what follows it is settled: either the
+     * next chapter has begun to be read, or it is known that nothing will be.
+     *
+     * [speaking] is false for that moment, and anything that takes it to mean the reading is
+     * over lets go of what the reading needs. The foreground service did: it was stopped
+     * at the end of every chapter and started again for the next, and Android forbids
+     * starting one from behind a locked screen, so with no music playing to hold the
+     * service up the app was killed at the first chapter end after the phone was pocketed.
+     * Whoever reads on calls [settled] when they have decided; [speak] and [stop] settle it
+     * themselves.
+     */
+    var carrying by mutableStateOf(false); private set
+    fun settled() { carrying = false }
     var verseIndex by mutableIntStateOf(-1); private set
     var wordIndex by mutableIntStateOf(-1); private set
 
@@ -105,7 +125,7 @@ class Narrator(private val ctx: Context) {
      */
     var onChapterEnd: (() -> Unit)? = null
 
-    private var tts: PhononTTS? = null
+    @Volatile private var tts: PhononTTS? = null
     private var job: Job? = null
     // Held so stop() can silence what is already queued inside AudioTrack; cancelling the
     // coroutine only stops generating, and a bufferful would keep playing without it.
@@ -115,6 +135,33 @@ class Narrator(private val ctx: Context) {
     // head is already past where this verse starts.
     private var written = 0L
     private val scope = CoroutineScope(Dispatchers.Default)
+
+    // Counts the readings begun. A reading that was stopped finishes tidying up on another
+    // thread a moment later, and by then the next may have started: it must not clear
+    // state that is no longer its own. It did — "read from here" pressed during a reading
+    // left the page showing nothing being read while the voice carried on.
+    @Volatile private var turn = 0
+    // What is being read, so a change of voice can start again from the line being heard.
+    private var reading: List<Line>? = null
+    @Volatile private var making: Job? = null
+
+    /**
+     * The one thread speech is made on. One, because the model is a single handle and must
+     * not be entered twice; its own, because it is kept on particular cores (see [Cores])
+     * and that cannot be done to a thread borrowed from a pool for a sentence at a time.
+     */
+    private val voiceThread = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "voice").apply { isDaemon = true }
+    }.asCoroutineDispatcher()
+    // How many threads the model was given. Fixed the first time it runs, for the life of
+    // the process: its pool cannot be resized.
+    private var width = 0
+    private var workers = IntArray(0)
+    private var scans = 0
+    private var raised = 0
+    private var placed = ""
+    private var named = -1
+    @Volatile private var pinned: Set<Int> = emptySet()
 
     /**
      * One thing to be read aloud.
@@ -140,8 +187,15 @@ class Narrator(private val ctx: Context) {
 
     private fun open(): PhononTTS {
         tts?.let { return it }
-        val cores = Runtime.getRuntime().availableProcessors()
-        Os.setenv("RAYON_NUM_THREADS", (cores / 2).coerceIn(2, 6).toString(), true)
+        // As many threads as there are fast cores left to the app off screen, not half of
+        // all cores as it was: on a Pixel 9 half is four, and off screen the fourth thread
+        // has only a small core to run on and holds the other three to its pace.
+        if (width == 0) {
+            width = Cores.width(Cores.capacity, Cores.away(ctx))
+            Os.setenv("RAYON_NUM_THREADS", width.toString(), true)
+            Log.d(TAG, "model on $width threads; cores ${Cores.capacity.joinToString(",")}" +
+                "; off screen ${Cores.away(ctx)?.let { Cores.span(it) } ?: "not seen yet"}")
+        }
         pruneVoices()
         val t = PhononTTS(File(ctx.filesDir, MODEL_DIR).path, "en")
         voices = t.voices
@@ -174,11 +228,22 @@ class Narrator(private val ctx: Context) {
     fun reset() { stop(); resumeAt = 0 }
 
     fun chooseVoice(name: String) {
+        // Speech is made up to half a minute ahead of the ear, so a voice chosen during a
+        // reading would not be heard until all of that had been played. Start again from
+        // the line that is sounding: the answer to choosing a voice is hearing it.
+        val lines = reading
+        val at = lineIndex
+        val again = speaking && lines != null && at >= 0
+        if (again) stop()
         voice = name
-        runCatching { tts?.setVoice(name) }
-        // Each voice has its own temperature, and its own tempo.
-        runCatching { tts?.setTemperature(warmth) }
+        // On the model's own thread, behind whatever it was in the middle of saying.
+        scope.launch(voiceThread) {
+            runCatching { tts?.setVoice(name) }
+            // Each voice has its own temperature, and its own tempo.
+            runCatching { tts?.setTemperature(Voices.warmth(name)) }
+        }
         retime()
+        if (again) speak(lines!!, at)
     }
 
     /**
@@ -196,17 +261,20 @@ class Narrator(private val ctx: Context) {
      */
     fun loadVoices() {
         if (voices.isNotEmpty() || !modelReady()) return
-        scope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { open() } }
+        scope.launch(voiceThread) { runCatching { open() } }
     }
 
     fun reloadVoices() {
         stop()
-        runCatching { tts?.close() }
-        tts = null
         voices = emptyList()
-        // Reopen at once rather than waiting for the next read, so the picker can show what
-        // just arrived. Loading is ~100 ms and this runs off the main thread.
-        scope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { open() } }
+        // On the model's thread, so it is never closed under a sentence it is still making.
+        // Reopened at once rather than at the next read, so the picker can show what just
+        // arrived. Loading is ~100 ms.
+        scope.launch(voiceThread) {
+            runCatching { tts?.close() }
+            tts = null
+            runCatching { open() }
+        }
     }
 
     fun stop() {
@@ -215,10 +283,13 @@ class Narrator(private val ctx: Context) {
         // numbers, and speak() starts from a line.
         if (speaking && lineIndex >= 0) resumeAt = lineIndex
         job?.cancel(); job = null
+        // The maker too, and now: it is told again when the reading has wound down, but
+        // that is a moment later and it would start another sentence in between.
+        making?.cancel(); making = null
         // pause() then flush() drops the frames AudioTrack has not played yet, which is what
         // makes the button feel like a stop rather than a request to stop soon.
         live?.let { t -> runCatching { t.pause(); t.flush() } }
-        speaking = false; preparing = false
+        speaking = false; preparing = false; carrying = false
         verseIndex = -1; wordIndex = -1; wordSpan = null
     }
 
@@ -228,8 +299,11 @@ class Narrator(private val ctx: Context) {
         if (lines.isEmpty()) return
         resumeAt = startAt
         error = null
+        reading = lines
         speaking = true
         preparing = true
+        carrying = false
+        val mine = ++turn
         job = scope.launch {
             val track = buildTrack()
             live = track
@@ -240,7 +314,7 @@ class Narrator(private val ctx: Context) {
             var maker: Job? = null
             var finished = false
             try {
-                val model = open()
+                val model = kotlinx.coroutines.withContext(voiceThread) { open() }
                 preparing = false
                 // Every clause of the chapter, flattened, so generation can run ahead of
                 // playback across verse boundaries as well as inside them.
@@ -254,34 +328,40 @@ class Narrator(private val ctx: Context) {
                         clausesOf(line.words).forEach { add(i to it) }
                     }
                 }
-                // Generation runs ahead of playback through a short queue: one coroutine,
-                // in order — the model is a single native handle and is not shared — filling
-                // a channel that holds LOOKAHEAD finished clauses. One clause of lookahead
-                // was not enough: a three-word sentence followed by a thirty-word one
-                // stalled, because the long one took longer to make than the short one took
-                // to say. Phonon is ~4x faster than speech, so the queue is full nearly
-                // all the time and a long sentence has been made two clauses before it is
-                // needed.
-                val feed = Channel<Pair<Pair<Int, Clause>, FloatArray>>(LOOKAHEAD)
-                maker = scope.launch(Dispatchers.Default) {
+                // Generation runs ahead of playback through a queue: one coroutine, in
+                // order — the model is a single native handle and is not shared — making
+                // clauses until AHEAD of finished speech is waiting, then resting until the
+                // voice has caught up. The queue was two clauses until 0.47, which is a few
+                // seconds: enough while the model is several times faster than speech, and
+                // nothing at all the moment it is not. Half a minute rides out a slow
+                // patch, and costs three megabytes.
+                val feed = Channel<Pair<Pair<Int, Clause>, FloatArray>>(Channel.UNLIMITED)
+                val ahead = AtomicLong(0)
+                maker = scope.launch(voiceThread) {
                     try {
                         for (step in script) {
+                            while (isActive && ahead.get() > AHEAD) kotlinx.coroutines.delay(100)
                             if (!isActive) break
-                            feed.send(step to render(model, step.second))
+                            tune()
+                            val pcm = render(model, step.second) { isActive } ?: break
+                            ahead.addAndGet(pcm.size.toLong())
+                            feed.send(step to pcm)
                         }
                         feed.close()
                     } catch (e: Throwable) {
                         feed.close(e)
                     }
                 }
+                making = maker
                 // Not counted before the first clause: that wait is the model opening,
                 // and the play button already shows it.
                 var idle = -1L
                 for ((step, pcm) in feed) {
+                    ahead.addAndGet(-pcm.size.toLong())
                     if (!isActive) break
                     // Time spent with nothing to say: the voice had finished a clause and
                     // the next was not made yet. Silence the script did not ask for.
-                    if (idle >= 0) (android.os.SystemClock.elapsedRealtime() - idle).let {
+                    if (idle >= 0) (SystemClock.elapsedRealtime() - idle).let {
                         if (it >= Pulse.STALL_MS) Log.d(TAG, "stalled $it ms waiting for the next clause")
                         Pulse.waited(it)
                     }
@@ -294,7 +374,7 @@ class Narrator(private val ctx: Context) {
                     verseIndex = line.verse
                     wordSpan = if (line.aside) null else clause.range
                     sayOne(track, line, clause, pcm)
-                    idle = android.os.SystemClock.elapsedRealtime()
+                    idle = SystemClock.elapsedRealtime()
                 }
                 drain(track)
                 finished = isActive
@@ -306,17 +386,25 @@ class Narrator(private val ctx: Context) {
             } finally {
                 maker?.cancel()
                 Pulse.save(ctx)
-                live = null
-                lineIndex = -1
                 runCatching { track.stop(); track.flush(); track.release() }
-                speaking = false; preparing = false
-                verseIndex = -1; wordIndex = -1; wordSpan = null
+                // Only if no reading has begun since: see [turn].
+                if (turn == mine) {
+                    live = null
+                    lineIndex = -1
+                    // Before speaking goes false, so nothing sees a moment with neither.
+                    if (finished && onChapterEnd != null) carrying = true
+                    speaking = false; preparing = false
+                    verseIndex = -1; wordIndex = -1; wordSpan = null
+                }
             }
-            if (finished) {
+            if (finished && turn == mine) {
                 // Read to the end, so the next press starts over — and whoever is listening
                 // may want the next chapter.
                 resumeAt = 0
-                Handler(Looper.getMainLooper()).post { onChapterEnd?.invoke() }
+                Handler(Looper.getMainLooper()).post {
+                    val then = onChapterEnd
+                    if (then != null && carrying) then() else carrying = false
+                }
             }
         }
     }
@@ -464,26 +552,96 @@ class Narrator(private val ctx: Context) {
      * and having the complete buffer means the highlight knows the true length of the
      * utterance from its first frame instead of dividing by a total that is still growing.
      */
-    private fun render(model: PhononTTS, clause: Clause): FloatArray {
+    private fun render(model: PhononTTS, clause: Clause, wanted: () -> Boolean): FloatArray? {
         // Debug-level, so the script can be read back from logcat when a device is the
         // only ear available: which clauses were made, and what split them.
         Log.d(TAG, "say [${clause.range}] ${clause.text}")
-        val began = android.os.SystemClock.elapsedRealtime()
+        val began = SystemClock.elapsedRealtime()
         val parts = mutableListOf<FloatArray>()
-        model.speak(speakable(clause.text)) { pcm -> parts += pcm.copyOf(); true }
+        // The model hands over a frame at a time and stops when told to, so a reading
+        // that has been stopped does not go on making a sentence nobody will hear, with
+        // the next reading waiting behind it for the thread.
+        var whole = true
+        // The model does its work on threads it starts for the sentence, not on the one
+        // that asked: this one only waits and is handed the frames. They take this
+        // thread's name, its cores and its priority as they are born, so placing this one
+        // places them; they are found here to be told so directly as well, and because
+        // theirs is the waiting that says whether they got the cores.
+        var crew: IntArray? = null
+        var first: LongArray? = null
+        var last: LongArray? = null
+        model.speak(speakable(clause.text)) { pcm ->
+            parts += pcm.copyOf()
+            val found = crew ?: run {
+                val me = Process.myTid()
+                Cores.threads("voice").filter { it != me }.toIntArray().also { c ->
+                    crew = c
+                    val to = pinned
+                    if (to.isNotEmpty() && c.isNotEmpty()) Cores.pin(c, to)
+                    if (named != c.size) { named = c.size; Log.d(TAG, "speech is made on ${c.size} threads of its own") }
+                }
+            }
+            if (found.isNotEmpty()) {
+                val now = LongArray(2)
+                var seen = false
+                for (t in found) Cores.waited(t)?.let { now[0] += it[0]; now[1] += it[1]; seen = true }
+                if (seen) { if (first == null) first = now; last = now }
+            }
+            wanted().also { if (!it) whole = false }
+        }
+        if (!whole) return null
         // How far ahead of the voice the model is running. Under 1x the reading stalls
         // between clauses however long the queue is, and that is heard as a long pause.
         run {
-            val took = (android.os.SystemClock.elapsedRealtime() - began).coerceAtLeast(1L)
+            val took = (SystemClock.elapsedRealtime() - began).coerceAtLeast(1L)
+            // The kernel's account of the making threads, first frame to last: time on a
+            // core, and time ready to run with no core free. The second is the slowing
+            // that Android does to an app off the screen, seen directly.
+            val a = first; val b = last
+            val ran = if (a != null && b != null) (b[0] - a[0]) / 1e9f else 0f
+            val queued = if (a != null && b != null) (b[1] - a[1]) / 1e9f else 0f
             val made = parts.sumOf { it.size }
-            Log.d(TAG, "made %.2f s in %.2f s, %.1fx".format(
-                made / RATE.toFloat(), took / 1000f, made * 1000f / RATE / took))
-            Pulse.made(made / RATE.toFloat(), took / 1000f)
+            Log.d(TAG, "made %.2f s in %.2f s, %.1fx, on a core %.2f s, waiting for one %.2f s".format(
+                made / RATE.toFloat(), took / 1000f, made * 1000f / RATE / took, ran, queued))
+            Pulse.made(made / RATE.toFloat(), took / 1000f, ran, queued, Cores.clock(pinned))
         }
         val raw = FloatArray(parts.sumOf { it.size })
         var at = 0
         parts.forEach { System.arraycopy(it, 0, raw, at, it.size); at += it.size }
         return trimmed(raw, clause.pause)
+    }
+
+    /**
+     * Keep the model's threads on the fastest cores the app may use at this moment, and
+     * note what those were. Called on [voiceThread] before every clause: where the threads
+     * may run is reset whenever the app moves on or off the screen. See [Cores].
+     */
+    private fun tune() {
+        runCatching {
+            // The model's own threads appear the first time it runs, so not before the
+            // second clause; until then they start out wherever this thread has been put.
+            if (workers.size < width - 1 && scans < 8) {
+                workers = Cores.threads("xn-worker"); scans++
+            }
+            val allowed = Cores.allowed()
+            if (allowed.isEmpty()) return
+            val chosen = Cores.choose(Cores.capacity, allowed, width)
+            val tids = intArrayOf(Process.myTid()) + workers
+            val held = Cores.pin(tids, chosen)
+            // A little above the ordinary, so that work nobody is waiting for does not take
+            // a core from a thread three others are waiting on. Below the screen's own.
+            if (raised != tids.size) {
+                tids.forEach { runCatching { Process.setThreadPriority(it, PRIORITY) } }
+                raised = tids.size
+            }
+            pinned = chosen
+            if (!Pulse.onScreen) Cores.sawAway(ctx, allowed)
+            Pulse.on(width, chosen, allowed, held)
+            val now = "$width threads (${tids.size} found) on cores ${Cores.span(chosen)} of " +
+                "${Cores.span(allowed)}, ${if (held) "held" else "NOT held"}, " +
+                if (Pulse.onScreen) "on screen" else "away"
+            if (now != placed) { placed = now; Log.d(TAG, now) }
+        }
     }
 
     /**
@@ -524,7 +682,7 @@ class Narrator(private val ctx: Context) {
         // between clauses — that is what keeps the reading gapless — so the head keeps
         // counting and each clause has to be measured from its own starting mark.
         val base = written
-        val began = android.os.SystemClock.elapsedRealtime()
+        val began = SystemClock.elapsedRealtime()
 
         // Where speech actually starts. render() has trimmed the model's lead-in, so this
         // is the short run-in it kept — found rather than assumed all the same.
@@ -584,7 +742,7 @@ class Narrator(private val ctx: Context) {
             }
             // The pace as it was heard, not as it was asked for: audio seconds over wall
             // seconds. This is how a speed change is checked on a device with no ear.
-            val took = (android.os.SystemClock.elapsedRealtime() - began).coerceAtLeast(1L)
+            val took = (SystemClock.elapsedRealtime() - began).coerceAtLeast(1L)
             Log.d(TAG, "heard %.2f s in %.2f s, %.2fx".format(
                 pcm.size / RATE.toFloat(), took / 1000f, pcm.size * 1000f / RATE / took))
         } finally {
@@ -604,8 +762,14 @@ class Narrator(private val ctx: Context) {
 
     fun close() {
         stop()
-        runCatching { tts?.close() }
+        // On the model's thread, behind the clause it may be in the middle of: freeing the
+        // model under a call still inside it is a crash in native code.
+        val t = tts
         tts = null
+        runCatching {
+            scope.launch(voiceThread) { runCatching { t?.close() } }
+            voiceThread.close()
+        }
     }
 
     /** A rough syllable count: vowel groups, with a silent trailing 'e' discounted. */
@@ -699,8 +863,8 @@ class Narrator(private val ctx: Context) {
         private const val PAUSE_BREATH = 4800       // 200 ms
         private const val PAUSE_STOP = 9600         // 400 ms
         private const val PAUSE_VERSE = 13200       // 550 ms
-        /** Finished clauses held ahead of playback. */
-        private const val LOOKAHEAD = 2
+        /** The model's threads: Android's own "display" priority, between ordinary and audio. */
+        private const val PRIORITY = -4
         /** Added to every word's syllable count, so short words still hold their turn. */
         private const val WORD_FLOOR = 0.7f
         /** Frames per blocking write. Small enough that write() paces the reading and a
@@ -713,6 +877,8 @@ class Narrator(private val ctx: Context) {
         /** The runtime's own default, for a voice not in [Voices]. The listed voices set their own. */
         const val NARRATION_TEMP = 0.3f
         const val RATE = 24000
+        /** Finished speech held ahead of playback, in frames: half a minute. */
+        private const val AHEAD = RATE * 30L
         const val MODEL_DIR = "phonon-31m-en"
         const val WEIGHTS = "model.q8.gguf"
         val MODEL_FILES = listOf("config.json", "tokenizer.json", WEIGHTS, "default-voice.safetensors")

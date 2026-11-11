@@ -399,11 +399,19 @@ fun SettingsScreen(
             // How the voice has kept up on this phone since this build was installed. Here
             // because a reading that drags with the screen off cannot be seen from a desk:
             // the emulator never slows down, so the phone has to report it.
+            // One paragraph a side, and selectable: these are for sending to whoever is
+            // looking into a reading that dragged, and nobody should have to retype them.
             val pulse = remember { Pulse.lines() }
-            if (pulse.isNotEmpty()) Text(
-                pulse.joinToString("\n"),
-                fontFamily = UiFont, fontSize = 11.sp, lineHeight = 19.sp, color = p.inkSoft,
-            )
+            if (pulse.isNotEmpty()) androidx.compose.foundation.text.selection.SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    pulse.forEach {
+                        Text(
+                            it,
+                            fontFamily = UiFont, fontSize = 11.sp, lineHeight = 19.sp, color = p.inkSoft,
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(40.dp))
         }
     }
