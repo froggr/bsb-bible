@@ -1,6 +1,6 @@
 # Status
 
-Last updated 2026-11-10. **0.47** is built and staged as a draft; **0.46** is the published build.
+Last updated 2026-11-11, **0.47** released.
 
 Install / share: <https://github.com/froggr/bsb-bible/releases/latest>
 
