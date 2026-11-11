@@ -227,9 +227,16 @@ waits for every worker, so **the voice runs at the pace of its slowest thread**.
 `top-app` is cores 0-7, `foreground` 0-6, `background` 0-3; cores 0-3 are small, 4-6 middle,
 7 large. A pool four wide then has one thread on a small core. `Cores` sizes the pool to the
 fast cores left off screen and re-pins before every clause, because a move between those sets
-resets where a thread may run. **This mechanism is read off files, not measured on a phone**;
-0.47 shipped on it without a measurement. The two "Reading aloud" lines at the foot of Settings
-are the measurement: ask for them.
+resets where a thread may run. 0.47 shipped on that reading of the files; **Joe's Pixel 9
+then measured it** (2026-11-11): off screen, 3 threads on cores 4-6 of 0-6, made at 2.9x and
+never below 1.6x over 39 min, waiting for a core 4% of the time, cores at 76% of full speed;
+on screen 3.9x, slowest 2.8x. So the voice is not behind any more, and yet it was still left
+waiting 8 times off screen, 7.6 s in all, longest 2.2 s. A model that never drops below 1.6x
+cannot empty a thirty-second buffer, so those waits are where the buffer is empty: **every
+`speak()` starts with nothing made ahead**, and a short first clause followed by a long one
+leaves the voice waiting. That is an inference from the code, not a measurement, and the
+silence at the chapter change itself is not in the tally at all (`idle` starts at -1). The two
+"Reading aloud" lines at the foot of Settings are the measurement: ask for them.
 
 **Never stop and restart the reading service across a chapter.** From the background,
 `startForegroundService()` throws `ForegroundServiceStartNotAllowedException` on Android 12 and
