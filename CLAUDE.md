@@ -247,6 +247,37 @@ epub tap then arrives a second time. `onCreate` ignores the intent when
 with `am start -a android.intent.action.VIEW -d "bsb://open?ref=John+3:16"`, open a book, go
 home, `am kill ca.lampandlight`, return through Recents.
 
+## Questions
+
+**The questions are people's, the answers are verses, and neither is to be generated.** Joe
+asked for an existing human-written curriculum instead of AI-written questions. The text is
+unfoldingWord's Translation Questions; their written answers are deliberately left out (they
+quote another translation and have slips), and the choices on the page are BSB verses. Do not
+"improve" a question or write distractors.
+
+**`app/app/src/main/assets/questions.db` is a hand copy of `data/questions.db`,** like the
+reading text. After `python3 -I data/questions.py`, `cp` it, and raise `VERSION` in the script
+and `Questions.VERSION` together or the phone keeps its old unpacked copy.
+
+**The chapter's questions are planned once, when it loads, not in `rebuild()`.** `rebuild()`
+runs on every study toggle and layer change; planning there would swap the question under the
+reader's finger the moment an answer was recorded.
+
+**The voice decides once whether to say an answer, at the wait.** `heard()` settles the
+question the moment the answer starts, so asking `replied` again per clause cuts the spoken
+verse off after its first clause. And a stop during the wait is not "unanswered":
+`awaitAnswer` calls `ensureActive()` before it reports.
+
+**The wait is 30 s on screen and 8 s off it** (`ASK_MS`, `ASK_AWAY_MS`). Joe asked for thirty
+seconds; with the phone locked nobody can tap, so thirty seconds of silence after every section
+is only dead air. Eight is long enough to answer in your head. The wait is not a stall and must
+not be counted as one in `Pulse`.
+
+**Going over is worked out from the log, not stored.** `learning.db` has one table, `asked`,
+one row per answer. `Quiz.dueAt` turns a question's rows into the time it is next due: ten
+minutes after a miss, then 1, 3, 7, 21, 60, 180 days as it is got right; a question known the
+first time starts at 7 days. Only questions already met while reading ever come due.
+
 ## Data
 
 **`app/app/src/main/assets/bible-reading.db` is a hand copy of `data/bible-reading.db`.**

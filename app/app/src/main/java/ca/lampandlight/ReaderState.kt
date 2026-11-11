@@ -106,6 +106,23 @@ sealed interface Row {
         override val key: String,
         override val margin: Margin = Margin(),
     ) : Row
+
+    /**
+     * A question on the reading just finished, set where its section ends.
+     *
+     * [choices] are passages of this chapter in the page's own words, one of which answers
+     * it; what the reader chose is not here but in [ReaderState.answers], so choosing does
+     * not lay the chapter out again.
+     */
+    data class Ask(
+        val asked: Quiz.Asked,
+        val choices: List<Choice>,
+        override val key: String,
+        override val margin: Margin = Margin(),
+    ) : Row {
+        /** One passage offered: its words, and where it is ("verse 16", "verses 14\u201315"). */
+        data class Choice(val text: String, val where: String)
+    }
 }
 
 /**
@@ -127,8 +144,10 @@ data class StudyLayers(
     val footnotes: Boolean = true,
     /** Commentary source keys to leave out, e.g. the 1710 and 1871 prose. */
     val hiddenCommentaries: Set<String> = emptySet(),
+    /** A question at the end of each section, which the voice waits on. */
+    val questions: Boolean = true,
 ) {
-    val any: Boolean get() = commentary || refs || footnotes
+    val any: Boolean get() = commentary || refs || footnotes || questions
 
     fun shows(source: String) = commentary && source !in hiddenCommentaries
 }
@@ -140,7 +159,11 @@ data class StudyLayers(
  * narrator addresses words by index and the reader draws them by index, so they have to
  * agree on the same list.
  */
-class ReaderState(private val bible: Bible, private val place: Place? = null) {
+class ReaderState(
+    private val bible: Bible,
+    private val place: Place? = null,
+    private val questions: Questions? = null,
+) {
 
     /**
      * Where the reader was last time.
@@ -473,6 +496,7 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
         verses = vs
         // The chapter changed, so last chapter's commentary must not show against it.
         commentary = emptyList(); refs = emptyMap(); studyFor = null
+        plan()
         loadMarks()          // lays the chapter out; notes are rows, so they must be known
         if (study) fetchStudy()
     }
@@ -511,12 +535,17 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
             ?.let { MarkColor.of(it.color) }
         fun commentLane(v: VerseId, beyond: Boolean): Boolean = long
             .any { it.start <= v && (if (beyond) it.end > v else it.end >= v) }
+        // Questions are a layer of study mode, keyed by the verse they follow.
+        val asking = if (study && layers.questions) asked.associateBy { it.after } else emptyMap()
 
         verses.forEachIndexed { i, v ->
             // A heading between two verses carries whatever spans both of them.
             val prev = verses.getOrNull(i - 1)?.id
             val above = if (prev != null) Margin(noteLane(prev, true), commentLane(prev, true))
                         else Margin()
+            // The question on the section that has just ended, under everything else that
+            // hangs from its last verse and above the heading of the next.
+            asking[i - 1]?.let { out += askRow(it, above) }
             v.heading?.let { out += Row.Heading(it, "h$i", above) }
             v.subheading?.let { out += Row.Heading(it, "s$i", above) }
             v.psalmTitle?.let { out += Row.Title(it, "t$i", above) }
@@ -573,7 +602,71 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
                         Margin(noteLane(v.id, true), commentLane(v.id, true)))
                 }
         }
+        asking[verses.lastIndex]?.let { out += askRow(it, Margin()) }
         rows = out
+    }
+
+    // ------------------------------------------------------------------ questions
+
+    /**
+     * The questions this chapter puts, settled when the chapter is opened.
+     *
+     * Not in [rebuild]: the page is laid out again whenever a mark changes or the study
+     * layer lands, and a question that changed under the reader's finger, or between the
+     * voice asking it and answering it, would be worse than none.
+     */
+    private var asked: List<Quiz.Asked> = emptyList()
+
+    /**
+     * What became of each question on this page, by its key: the choice the reader made, or
+     * [HEARD] when nobody answered and the voice read the answer out.
+     */
+    var answers by mutableStateOf<Map<String, Int>>(emptyMap())
+        private set
+
+    private fun plan() {
+        answers = emptyMap()
+        val q = questions?.of(book, chapter).orEmpty()
+        asked = if (q.isEmpty()) emptyList() else Quiz.plan(
+            verses = verses.map { it.id },
+            opens = verses.indices.filter { verses[it].heading != null }.toSet(),
+            questions = q,
+            past = questions?.past(q.map { it.key }).orEmpty(),
+        )
+    }
+
+    private fun askRow(a: Quiz.Asked, margin: Margin): Row.Ask {
+        val byId = verses.associateBy { it.id }
+        return Row.Ask(
+            asked = a,
+            choices = choicesOf(a) { byId[it]?.text },
+            key = "q${a.question.key}",
+            margin = margin,
+        )
+    }
+
+    /** The reader chose [option] for the question [key]. The first choice is the answer. */
+    fun answer(key: String, option: Int) {
+        if (key in answers) return
+        val a = asked.firstOrNull { it.question.key == key } ?: return
+        answers = answers + (key to option)
+        questions?.record(key, if (option == a.correct) Quiz.RIGHT else Quiz.WRONG)
+    }
+
+    /** Nobody answered [key] and the voice has read the answer: show it on the page too. */
+    fun heard(key: String) {
+        if (key in answers) return
+        answers = answers + (key to HEARD)
+        questions?.record(key, Quiz.HEARD)
+    }
+
+    /**
+     * For the voice: null while [key] is still open, else whether it was got right. A
+     * question that was only heard counts as not right, and is not asked aloud again.
+     */
+    fun replied(key: String): Boolean? {
+        val chosen = answers[key] ?: return null
+        return asked.firstOrNull { it.question.key == key }?.correct == chosen
     }
 
     // ------------------------------------------------------------------ study mode
@@ -698,6 +791,23 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
                         add(Narrator.Line(v, splitWords(said), said,
                             aside = true, preamble = commentaryName(row.source) + " writes."))
                 }
+                // Asked aloud, then the verse that answers it. The narrator waits between
+                // the two and leaves the second unsaid if the reader answers; a question
+                // already settled is not asked again.
+                is Row.Ask -> {
+                    // Always both lines, settled or not: the voice leaves a settled one
+                    // unsaid by asking [replied]. Dropping them here instead would renumber
+                    // every line after it, and a reading paused further down the chapter
+                    // carries on from a line NUMBER, so it would come back two lines late.
+                    val q = row.asked.question
+                    val right = row.choices[row.asked.correct]
+                    add(Narrator.Line(row.asked.after, splitWords(q.text), q.text,
+                        aside = true, preamble = "A question.", question = q.key))
+                    add(Narrator.Line(row.asked.after, splitWords(right.text), right.text,
+                        aside = true, answerTo = q.key,
+                        preamble = right.where.replaceFirstChar { it.uppercase() }
+                            .replace("\u2013", " and ") + "."))
+                }
                 else -> Unit
             }
         }
@@ -723,6 +833,9 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
     fun lineOfVerse(index: Int): Int =
         narrationLines().indexOfFirst { it.verse == index }.coerceAtLeast(0)
 
+    /** The verse, by position in the chapter, that narration line [line] belongs to. */
+    fun verseOfLine(line: Int): Int = narrationLines().getOrNull(line)?.verse ?: line
+
     /**
      * Open the chapter.
      *
@@ -734,8 +847,21 @@ class ReaderState(private val bible: Bible, private val place: Place? = null) {
     init { load() }
 
     companion object {
+        /** In [answers]: the voice gave the answer, the reader chose nothing. */
+        const val HEARD = -1
+
         /** Display words. Punctuation stays attached so the line breaks read naturally. */
         fun splitWords(text: String): List<String> =
             text.split(' ').filter { it.isNotBlank() }
     }
 }
+
+/** What [a] offers, as the page shows it: each choice's words and where they are. */
+internal fun choicesOf(a: Quiz.Asked, text: (VerseId) -> String?): List<Row.Ask.Choice> =
+    a.options.map { (from, to) ->
+        Row.Ask.Choice(
+            text = (from..to).mapNotNull(text).joinToString(" "),
+            where = if (from == to) "verse ${from.verse}"
+                    else "verses ${from.verse}\u2013${to.verse}",
+        )
+    }

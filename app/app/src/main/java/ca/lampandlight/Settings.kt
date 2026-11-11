@@ -52,6 +52,7 @@ class Prefs(ctx: Context) {
     var studyCommentary by mutableStateOf(sp.getBoolean("studyComm", true))
     var studyRefs by mutableStateOf(sp.getBoolean("studyRefs", true))
     var studyFootnotes by mutableStateOf(sp.getBoolean("studyNotes", true))
+    var studyQuestions by mutableStateOf(sp.getBoolean("studyAsk", true))
 
     /**
      * Commentaries switched off, by source key, comma separated.
@@ -73,7 +74,8 @@ class Prefs(ctx: Context) {
         save()
     }
 
-    fun studyLayers() = StudyLayers(studyCommentary, studyRefs, studyFootnotes, hiddenCommentaries())
+    fun studyLayers() =
+        StudyLayers(studyCommentary, studyRefs, studyFootnotes, hiddenCommentaries(), studyQuestions)
 
     /**
      * The colour the quick gestures use.
@@ -92,6 +94,7 @@ class Prefs(ctx: Context) {
 
     fun setStudyLayers(l: StudyLayers) {
         studyCommentary = l.commentary; studyRefs = l.refs; studyFootnotes = l.footnotes
+        studyQuestions = l.questions
         commentaryOff = l.hiddenCommentaries.sorted().joinToString(",")
         save()
     }
@@ -135,6 +138,7 @@ class Prefs(ctx: Context) {
             .putBoolean("studyComm", studyCommentary)
             .putBoolean("studyRefs", studyRefs)
             .putBoolean("studyNotes", studyFootnotes)
+            .putBoolean("studyAsk", studyQuestions)
             .putString("commOff", commentaryOff)
             .putString("shelfOrder", shelfOrder)
             .apply()
@@ -345,8 +349,9 @@ fun SettingsScreen(
 
             // Choosing which commentaries show used to be reachable only by long-pressing
             // the Study button, which nobody can be expected to guess. Same sheet, said out
-            // loud, next to the download it governs.
-            if (layersPresent.second) {
+            // loud, next to the download it governs. Shown whether or not the commentary is
+            // on the phone: the questions come with the app and are switched here too.
+            run {
                 Text(
                     "What shows under each verse",
                     fontFamily = UiFont, fontSize = 14.sp, fontWeight = FontWeight.Medium,
@@ -357,8 +362,9 @@ fun SettingsScreen(
                         .padding(top = 2.dp, bottom = 4.dp),
                 )
                 Text(
-                    "Pick the commentaries you want \u2014 Tyndale's modern English on its own, " +
-                        "or with Wesley, Henry and JFB. Also cross-references and translator's notes.",
+                    "A question at the end of each section, and which commentaries you want \u2014 " +
+                        "Tyndale's modern English on its own, or with Wesley, Henry and JFB. " +
+                        "Also cross-references and translator's notes.",
                     fontFamily = UiFont, fontSize = 11.sp, lineHeight = 18.sp, color = p.inkSoft,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -392,6 +398,9 @@ fun SettingsScreen(
                     "from CrossWire, public domain.\n" +
                     "Tyndale Open Study Notes \u00a9 2022 Tyndale House Publishers, " +
                     "CC BY-SA 4.0, available free at tyndaleopenresources.com.\n" +
+                    "Questions adapted from Translation Questions, CC BY-SA 4.0: the answers " +
+                    "are left out and the divine name is written as the BSB writes it. " +
+                    "The original work by unfoldingWord is available from unfoldingword.org/utq.\n" +
                     "Speech by Phonon (Gradium), Apache 2.0, generated on this phone.",
                 fontFamily = UiFont, fontSize = 11.sp, lineHeight = 19.sp, color = p.inkSoft,
                 modifier = Modifier.padding(bottom = 18.dp),
@@ -579,7 +588,11 @@ fun LibraryScreen(bible: Bible, onOpen: (VerseId) -> Unit, onClose: () -> Unit) 
 
 /** The small menu behind "Marks & settings". */
 @Composable
-fun MenuScreen(onBooks: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onClose: () -> Unit) {
+fun MenuScreen(
+    onBooks: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onClose: () -> Unit,
+    /** How many questions are due to be gone over; null where there are no questions. */
+    due: Int? = null, onGoOver: () -> Unit = {},
+) {
     val p = LocalPalette.current
     Column(
         Modifier.fillMaxSize().background(p.paper)
@@ -596,6 +609,15 @@ fun MenuScreen(onBooks: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Uni
             )
         }
         MenuItem("Books", "Your own epubs, read and listened to here", onBooks)
+        if (due != null) MenuItem(
+            "Go over",
+            when (due) {
+                0 -> "Questions you met while reading come back here"
+                1 -> "One question from what you have read"
+                else -> "$due questions from what you have read"
+            },
+            onGoOver,
+        )
         MenuItem("Marks and notes", "Everything you have coloured or written on", onLibrary)
         MenuItem("Settings", "Text size, theme, music, study material", onSettings)
     }

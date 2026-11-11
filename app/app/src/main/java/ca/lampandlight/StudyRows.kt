@@ -458,10 +458,16 @@ fun StudyLayersSheet(
             )
             Spacer(Modifier.height(4.dp))
             androidx.compose.material3.Text(
-                "What sits under each verse. Your own notes always show.",
+                "What study mode adds to the page. Your own notes always show.",
                 fontFamily = UiFont, fontSize = 12.sp, lineHeight = 18.sp, color = p.inkSoft,
             )
             Spacer(Modifier.height(18.dp))
+            // First, because it is the one layer that asks something back, and the one that
+            // changes how a chapter is read aloud: the voice stops and waits.
+            LayerRow(
+                "Questions", "One after each section. The voice asks, and waits for you",
+                layers.questions,
+            ) { onChange(layers.copy(questions = it)) }
             LayerRow(
                 "Commentary", "Explanations of the verse",
                 layers.commentary,

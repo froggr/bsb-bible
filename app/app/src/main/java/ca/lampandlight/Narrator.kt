@@ -14,6 +14,7 @@ import android.system.Os
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
@@ -22,6 +23,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -125,6 +127,68 @@ class Narrator(private val ctx: Context) {
      */
     var onChapterEnd: (() -> Unit)? = null
 
+    /**
+     * The question the voice has just asked and is waiting on, by its key; null otherwise.
+     *
+     * A question is two lines: the asking, and the answer. Between them the voice stops and
+     * waits. Answered in that time, it goes on with the reading and the answer is never
+     * said; left alone, it reads the answer out and goes on. [askedAt] is when the waiting
+     * began and [askFor] how long it will last, both on the uptime clock, for the page to
+     * show the time running.
+     */
+    var asking by mutableStateOf<String?>(null); private set
+
+    /** The question being put or answered aloud at this moment, for the page to bring up. */
+    var posed by mutableStateOf<String?>(null); private set
+    var askedAt by mutableLongStateOf(0L); private set
+    var askFor by mutableLongStateOf(ASK_MS); private set
+
+    /**
+     * What the listener has done about a question: null while it is open, else whether they
+     * were right. Asked from the reading's own thread.
+     */
+    var replied: ((String) -> Boolean?)? = null
+
+    /** Called, on the main thread, when the wait ran out and the answer is being read. */
+    var onUnanswered: ((String) -> Unit)? = null
+
+    /**
+     * Wait for an answer to [key]. True if one came, and the answer need not be said.
+     *
+     * Half a minute with the page in front of someone. With the screen off or the app put
+     * away nobody can answer, and half a minute of silence between sections is not a pause
+     * to think in but a reading that seems to have stopped; there it is a few seconds, as a
+     * teacher leaves after a question before giving the answer. Coming back to the page
+     * part-way through gives the full time from when the question was asked.
+     */
+    private suspend fun awaitAnswer(key: String): Boolean {
+        val began = SystemClock.elapsedRealtime()
+        askedAt = began
+        asking = key
+        try {
+            while (currentCoroutineContext().isActive) {
+                val right = replied?.invoke(key)
+                if (right != null) {
+                    // A moment on the page before the voice moves on: longer after a wrong
+                    // choice, when the right verse has just been shown and wants reading.
+                    asking = null
+                    kotlinx.coroutines.delay(if (right) BEAT_RIGHT_MS else BEAT_WRONG_MS)
+                    return true
+                }
+                val allow = if (Pulse.onScreen) ASK_MS else ASK_AWAY_MS
+                if (allow != askFor) askFor = allow
+                if (SystemClock.elapsedRealtime() - began >= allow) break
+                kotlinx.coroutines.delay(100)
+            }
+        } finally {
+            asking = null
+        }
+        // Stopped while waiting is not the same as nobody answering.
+        currentCoroutineContext().ensureActive()
+        Handler(Looper.getMainLooper()).post { onUnanswered?.invoke(key) }
+        return false
+    }
+
     @Volatile private var tts: PhononTTS? = null
     private var job: Job? = null
     // Held so stop() can silence what is already queued inside AudioTrack; cancelling the
@@ -179,6 +243,13 @@ class Narrator(private val ctx: Context) {
         val aside: Boolean = false,
         /** Spoken before the text, to say whose words these are. */
         val preamble: String? = null,
+        /** Set on a question put to the listener: its key. The line after it answers it. */
+        val question: String? = null,
+        /**
+         * Set on the answer to the question with this key. The voice waits before it, and
+         * leaves it unsaid if the listener has answered. See [asking].
+         */
+        val answerTo: String? = null,
     )
 
     fun modelReady(): Boolean = File(ctx.filesDir, MODEL_DIR).let { d ->
@@ -291,12 +362,16 @@ class Narrator(private val ctx: Context) {
         live?.let { t -> runCatching { t.pause(); t.flush() } }
         speaking = false; preparing = false; carrying = false
         verseIndex = -1; wordIndex = -1; wordSpan = null
+        asking = null; posed = null
     }
 
     /** Read [lines] in order, from [startAt]. */
-    fun speak(lines: List<Line>, startAt: Int = 0) {
+    fun speak(lines: List<Line>, from: Int = 0) {
         stop()
         if (lines.isEmpty()) return
+        // Starting on an answer would be an answer to nothing: begin at its question.
+        val startAt = if (lines.getOrNull(from)?.answerTo != null &&
+            lines.getOrNull(from - 1)?.question == lines[from].answerTo) from - 1 else from
         resumeAt = startAt
         error = null
         reading = lines
@@ -356,6 +431,11 @@ class Narrator(private val ctx: Context) {
                 // Not counted before the first clause: that wait is the model opening,
                 // and the play button already shows it.
                 var idle = -1L
+                // The answer line last waited before, and the one being left unsaid: decided
+                // once, at the wait, so an answer the voice has begun is finished even
+                // though the page marks the question settled the moment it begins.
+                var waitedOn: String? = null
+                var unsaid: String? = null
                 for ((step, pcm) in feed) {
                     ahead.addAndGet(-pcm.size.toLong())
                     if (!isActive) break
@@ -367,11 +447,29 @@ class Narrator(private val ctx: Context) {
                     }
                     val (i, clause) = step
                     val line = lines[i]
+                    // A question the listener settled on the page before the voice reached
+                    // it is not asked, and its answer is not read.
+                    if (line.question != null && replied?.invoke(line.question) != null) {
+                        idle = -1L
+                        continue
+                    }
+                    if (line.answerTo != null) {
+                        // Before the first clause of an answer, wait for the listener's.
+                        if (line.answerTo != waitedOn) {
+                            waitedOn = line.answerTo
+                            unsaid = if (replied?.invoke(line.answerTo) != null) line.answerTo
+                                     else if (awaitAnswer(line.answerTo)) line.answerTo else null
+                            // The wait is silence the script asked for, not a stall.
+                            idle = -1L
+                        }
+                        if (unsaid == line.answerTo) continue
+                    }
                     // An aside is read against the verse it belongs to, so the page keeps
                     // that verse marked while its commentary is spoken instead of going
                     // blank. Only scripture gets the moving highlight within the verse.
                     lineIndex = i
                     verseIndex = line.verse
+                    (line.question ?: line.answerTo).let { if (it != posed) posed = it }
                     wordSpan = if (line.aside) null else clause.range
                     sayOne(track, line, clause, pcm)
                     idle = SystemClock.elapsedRealtime()
@@ -395,6 +493,7 @@ class Narrator(private val ctx: Context) {
                     if (finished && onChapterEnd != null) carrying = true
                     speaking = false; preparing = false
                     verseIndex = -1; wordIndex = -1; wordSpan = null
+                    posed = null
                 }
             }
             if (finished && turn == mine) {
@@ -879,6 +978,13 @@ class Narrator(private val ctx: Context) {
         const val RATE = 24000
         /** Finished speech held ahead of playback, in frames: half a minute. */
         private const val AHEAD = RATE * 30L
+
+        /** How long the voice waits on a question with the page in front of someone. */
+        const val ASK_MS = 30_000L
+        /** And with the screen off or the app put away, where nobody can answer. */
+        const val ASK_AWAY_MS = 8_000L
+        private const val BEAT_RIGHT_MS = 1_200L
+        private const val BEAT_WRONG_MS = 3_500L
         const val MODEL_DIR = "phonon-31m-en"
         const val WEIGHTS = "model.q8.gguf"
         val MODEL_FILES = listOf("config.json", "tokenizer.json", WEIGHTS, "default-voice.safetensors")

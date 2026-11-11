@@ -190,6 +190,20 @@ fun Reader(
         if (needs) list.animateScrollToItem(target, -200)
     }
 
+    // When the voice puts a question, bring its panel up the page: it hangs from the last
+    // verse of the section, which is usually in view already while the panel under it is
+    // still below the player.
+    LaunchedEffect(narrator.posed) {
+        val key = narrator.posed ?: return@LaunchedEffect
+        if (!voiced) return@LaunchedEffect
+        val target = state.rows.indexOfFirst { it is Row.Ask && it.asked.question.key == key }
+        if (target < 0) return@LaunchedEffect
+        val info = list.layoutInfo
+        val item = info.visibleItemsInfo.firstOrNull { it.index == target }
+        val clear = info.viewportEndOffset - with(density) { (playerHeight + 22.dp).roundToPx() }
+        if (item == null || item.offset + item.size > clear) list.animateScrollToItem(target, -90)
+    }
+
     /**
      * Which verse sits under a point on screen, from the list's own layout.
      *
@@ -285,6 +299,17 @@ fun Reader(
                             "verses ${row.start.verse}\u2013${row.verse.verse}" else null,
                     ) { onOpenNote(row.start, row.verse) }
                     is Row.Footnote -> FootnoteRow(row.letter, row.phrase, row.text)
+                    is Row.Ask -> {
+                        val key = row.asked.question.key
+                        AskRow(
+                            row = row,
+                            chosen = state.answers[key],
+                            waiting = voiced && narrator.asking == key,
+                            waitFrom = narrator.askedAt,
+                            waitFor = narrator.askFor,
+                            onChoose = { chromeVisible = true; state.answer(key, it) },
+                        )
+                    }
                     // Drawn once under the last verse it covers, labelled with the span
                     // and bracketed from its first verse, the same way as a note.
                     is Row.Comment -> CommentRow(
@@ -380,8 +405,16 @@ fun Reader(
         ) {
             PlayerBar(
                 narrator, bed, prefs,
-                reading = "reading verse ${state.verses.getOrNull(sounding)?.id?.verse ?: ""}",
-                resume = "Continue from verse ${state.verses.getOrNull(narrator.resumeAt)?.id?.verse ?: ""}",
+                reading = when {
+                    narrator.asking != null -> "waiting for your answer"
+                    narrator.posed != null -> "a question"
+                    else -> "reading verse ${state.verses.getOrNull(sounding)?.id?.verse ?: ""}"
+                },
+                // resumeAt is a LINE of the script; with study rows and questions between the
+                // verses that is not the verse's own position.
+                resume = "Continue from verse ${state.verses.getOrNull(
+                    remember(narrator.resumeAt, state.rows) { state.verseOfLine(narrator.resumeAt) }
+                )?.id?.verse ?: ""}",
                 onPlay = { narrator.speak(state.narrationLines(), narrator.resumeAt) },
             )
         }

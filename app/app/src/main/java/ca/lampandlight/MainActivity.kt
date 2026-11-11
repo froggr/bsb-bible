@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
     private var bible: Bible? = null
     private var narrator: Narrator? = null
     private var bed: Bed? = null
+    private var questions: Questions? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,6 +76,10 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(Unit) {
                 try {
                     val b = withContext(Dispatchers.IO) { Bible.open(this@MainActivity) }
+                    // The questions are an extra: a phone that cannot unpack them still reads.
+                    questions = withContext(Dispatchers.IO) {
+                        runCatching { Questions.open(this@MainActivity) }.getOrNull()
+                    }
                     bible = b
                     narrator = Narrator(this@MainActivity)
                     bed = Bed(this@MainActivity)
@@ -100,7 +105,7 @@ class MainActivity : ComponentActivity() {
 
                     b == null -> Box(Modifier.fillMaxSize().background(p.paper))
 
-                    else -> App(b, narrator!!, bed!!, prefs)
+                    else -> App(b, narrator!!, bed!!, prefs, questions)
                 }
             }
         }
@@ -166,8 +171,8 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
-    val state = remember { ReaderState(bible, prefs.place) }
+private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs, questions: Questions?) {
+    val state = remember { ReaderState(bible, prefs.place, questions) }
     var picking by remember { mutableStateOf(false) }
     var studying by remember { mutableStateOf<Pair<VerseId, Int?>?>(null) }
     var layering by remember { mutableStateOf(false) }
@@ -189,6 +194,13 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
             if (prefs.openBook.isNotBlank() && Deeplink.verseOf(cold, bible.books) == null &&
                 epubOf(cold) == null) "book" else "read"
         )
+    }
+    // How many questions are due to be gone over, counted afresh whenever the menu opens.
+    var due by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(screen) {
+        if (screen == "menu" && questions != null) {
+            due = withContext(Dispatchers.IO) { questions.due().size }
+        }
     }
     // The verse whose action sheet is open, with its row index so "read from here" works.
     var acting by remember { mutableStateOf<Pair<VerseId, Int>?>(null) }
@@ -300,6 +312,13 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
     // A chapter read to its end runs on into the next, unless asked not to. The next
     // chapter's study material comes off disk, so in study mode the voice waits for it
     // — briefly — rather than reading the verses and skipping the commentary.
+    // The voice asks the page's questions and has to know when one has been answered, and
+    // the page has to show the answer when the voice gives it. A book has no questions, so
+    // these are the Bible's alone and are never called while a book is being read.
+    LaunchedEffect(Unit) {
+        narrator.replied = { state.replied(it) }
+        narrator.onUnanswered = { state.heard(it) }
+    }
     LaunchedEffect(Unit) {
         narrator.onChapterEnd = {
             val s = session
@@ -554,7 +573,7 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
             screen == "book" -> shutBook()
             screen == "books" -> screen = "read"
             selection.isNotEmpty() -> selection = emptySet()
-            screen == "library" || screen == "settings" -> screen = "menu"
+            screen == "library" || screen == "settings" || screen == "goover" -> screen = "menu"
             screen != "read" -> screen = "read"
             // A passage a book opened: back is back to the book.
             session != null && crumbAt >= 0 && state.depth == crumbAt -> {
@@ -611,7 +630,19 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs) {
             onLibrary = { screen = "library" },
             onSettings = { screen = "settings" },
             onClose = { screen = "read" },
+            due = due,
+            onGoOver = { screen = "goover" },
         )
+        "goover" -> questions?.let { q ->
+            GoOverScreen(
+                bible = bible,
+                questions = q,
+                onRead = { v ->
+                    screen = "read"; narrator.reset(); state.go(v.book, v.chapter, at = v.verse)
+                },
+                onClose = { screen = "read" },
+            )
+        }
         "library" -> LibraryScreen(
             bible = bible,
             onOpen = { v ->

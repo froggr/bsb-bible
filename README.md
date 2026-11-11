@@ -37,6 +37,13 @@ Needs Android 10 or newer, and about 120 MB free once the voice is downloaded.
   A translator's note marks the words it is about with a small letter and a dotted underline,
   and quotes them.
 - **Scripture cited in the commentary is a link.** Tap `Rom 5:6-8` and you are there.
+- **It asks you what you just read.** In study mode a question closes each section, and the
+  answers to choose between are verses of the passage in their own words. With the voice
+  reading, it asks the question aloud and waits thirty seconds; answer and it carries on, say
+  nothing and it reads the verse that answers it. A question you missed comes back a few
+  minutes later under *Go over*, and then after a day, three days, a week, and so on. The
+  questions were written by people, not generated: they are unfoldingWord's Translation
+  Questions.
 - **Your own books, on the same page.** Bring in the epubs you already own, a folder at a
   time, and they are set in the same type and read in the same voice as the Bible. Every
   Scripture reference in them opens its passage in a sheet over the page, so the place in
@@ -71,6 +78,11 @@ update itself, which is how this one delivers new versions.
 
 The verse text is the **Berean Standard Bible**, chosen because it is freely available for
 anyone to use and share. Read-aloud uses the open-source **Phonon** speech model.
+
+The questions asked in study mode are adapted from unfoldingWord's **Translation Questions**
+(CC BY-SA 4.0): only the questions are used, their written answers are left out, and the divine
+name is written as the BSB writes it. The original work is available from
+<https://unfoldingword.org/utq>.
 
 This repository holds the source and the built releases. Questions or problems: open an issue.
 
@@ -149,6 +161,7 @@ Everything is public domain or CC-BY, and all of it is verified as downloading.
 | `…/rawzip/Wesley.zip` | 1.9 MB | John Wesley's Explanatory Notes (1755), whole Bible |
 | `…/rawzip/KJV.zip` | 4.5 MB | King James with Strong's numbers on every word. Build input only: it places Wesley's lemmas |
 | `tyndaleopenresources.com/…/tyndale_open-studynotes.zip` | 2.9 MB | Tyndale Open Study Notes (2022), whole Bible |
+| `git.door43.org/unfoldingWord/en_tq` release v91, the 66 `tq_*.tsv` | 3 MB | Translation Questions: 17,220 questions with a verse reference each |
 
 BSB text is CC0. Cross-references need the line
 `Cross-references from OpenBible.info, CC-BY`. Henry, JFB and Wesley declare
@@ -224,6 +237,28 @@ Notes on the data, learned the hard way:
   using sentinel characters, *then* collapse whitespace — do it the other way round and the
   whitespace pass strands the `*` away from the word it belongs to.
 - CCEL's XML downloads are zero bytes; CrossWire's `ftpmirror` is the working source.
+
+### The questions
+
+`python3 -I data/questions.py` reads `data/src/x_TQ/tq_<BOOK>.tsv` and `data/bible-reading.db`
+and writes `data/questions.db`: 16,687 questions over all 1,189 chapters, 1.7 MB. Then
+`cp data/questions.db app/app/src/main/assets/questions.db`. It ships inside the APK, not as a
+download, and the phone replaces its unpacked copy when `PRAGMA user_version` goes up, so
+`VERSION` in the script and `Questions.VERSION` in the app move together.
+
+Only three columns are kept: the reference, the id and the question. A question is dropped
+when its reference is not a single verse or a pair (521 of them: "what happens in verses
+3 to 9" has no one verse to offer as the answer), or names a verse the BSB does not have.
+unfoldingWord's own written answers are **not** shipped. They quote their translation, not
+the BSB, say "Yahweh" where the page says "the LORD", and have slips in them; the answer the
+app gives is always the verse itself. The licence is CC BY-SA 4.0, so the changes are stated
+in the `about` table of the database and in the app's About text, and
+`data/src/x_TQ/_README.txt` and `_LICENSE.md` stay with the source files.
+
+What the reader answered lives in a second file on the phone, `learning.db`, which no update
+replaces. It is a plain log, one row per answer, and everything else is worked out from it:
+which question a section asks next (`Quiz.choose`) and when one is due to be gone over
+(`Quiz.dueAt`).
 
 ## The app
 
