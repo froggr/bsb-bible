@@ -18,8 +18,9 @@ data class Heart(val verse: VerseId, val added: Long, val history: List<Past>, v
  * The method is the old one: hear it, say it after the voice a phrase at a time, then say
  * each phrase before the voice does, then say all of it from the reference alone. What the
  * app adds is a voice that will do this at any hour, with the screen off, and that leaves
- * the right length of silence. No microphone: nobody is marked. The listener hears the
- * phrase a moment after saying it and knows.
+ * the right length of silence. Nobody is marked. The listener hears the phrase a moment
+ * after saying it and knows. Where it has been asked for the card listens for the line and
+ * goes on when it has been said (see [Ears]), and that marks nobody either.
  *
  * It works in phrases, not words, because a phrase is the smallest thing the voice can be
  * silent for exactly. The model reports no timing, so where one word falls inside a

@@ -207,6 +207,8 @@ fun GoOverScreen(
     bible: Bible,
     questions: Questions,
     narrator: Narrator,
+    ears: Ears,
+    prefs: Prefs,
     /** A verse to go straight to: the one just taken up from the page. */
     start: VerseId? = null,
     /** Open the chapter a question is from, at its answer. */
@@ -236,7 +238,8 @@ fun GoOverScreen(
         if (page != TURN) verses = GoOver.verses(bible, questions)
     }
     // A verse being read here stops when the page is left; the Bible's own reading does not.
-    DisposableEffect(Unit) { onDispose { if (narrator.alone) narrator.stop() } }
+    // And what was listening lets its models go: they are wanted nowhere else.
+    DisposableEffect(Unit) { onDispose { if (narrator.alone) narrator.stop(); ears.release() } }
     // Back goes up one: from the voice to the list, from one verse to the list it was
     // picked from, from the list to the round. A verse come to from the page goes back there.
     fun up() {
@@ -365,7 +368,7 @@ fun GoOverScreen(
                             },
                         )
                         is GoOver.Item.Verse -> HeartCard(
-                            item = item, slot = i, narrator = narrator,
+                            item = item, slot = i, narrator = narrator, ears = ears, prefs = prefs,
                             said = knew[i]?.let { if (it) Quiz.RIGHT else Quiz.WRONG },
                             back = back,
                             onSaid = { outcome ->

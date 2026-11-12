@@ -28,8 +28,8 @@ android {
         applicationId = "ca.lampandlight"
         minSdk = 29
         targetSdk = 36
-        versionCode = 51
-        versionName = "0.51"
+        versionCode = 52
+        versionName = "0.52"
         // Phonon ships arm64-v8a and x86_64 only; a 32-bit install would fail to load the .so.
         // ANDROID_ABIS=arm64-v8a builds a phone-only APK, about 9 MB smaller than one that
         // also carries the emulator's x86_64 library.
@@ -71,7 +71,10 @@ android {
     buildFeatures { compose = true }
     packaging {
         // JNA ships every ABI; keep only ours.
-        jniLibs { useLegacyPackaging = false }
+        // Compressed in the APK and unpacked at install: with the recogniser's two libraries
+        // beside the voice's there are about fifty megabytes of native code, and stored
+        // as they are the download would nearly double.
+        jniLibs { useLegacyPackaging = true }
     }
 }
 
@@ -83,6 +86,9 @@ dependencies {
     // Reading the pages of an epub. Small, pure Java, and forgiving of the markup
     // self-published books actually contain.
     implementation("org.jsoup:jsoup:1.17.2")
+    // Hearing a verse said: sherpa-onnx 1.13.7, the classes out of its stock AAR. Its
+    // libraries are in jniLibs beside the voice's, the two it needs and no more.
+    implementation(files("libs/sherpa-onnx-1.13.7.jar"))
     testImplementation("junit:junit:4.13.2")
 
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))

@@ -69,6 +69,14 @@ class Bed(private val ctx: Context) {
 
     /** True while narration is sounding, so the bed holds itself down. */
     private var ducked = false
+    private var hushed = false
+    /** Where the gain belongs when nothing is moving it. */
+    private val resting: Float
+        get() = when {
+            hushed -> 0f
+            ducked -> target * duckFloor(level)
+            else -> target
+        }
 
     @Volatile private var live: AudioTrack? = null
     private var pump: Job? = null
@@ -141,7 +149,7 @@ class Bed(private val ctx: Context) {
     fun setVolume(v: Float) {
         level = v.coerceIn(0f, 1f)
         fade?.cancel(); fade = null
-        gain(if (ducked) target * duckFloor(level) else target)
+        gain(resting)
     }
 
     private fun gain(g: Float) {
@@ -192,7 +200,7 @@ class Bed(private val ctx: Context) {
             live = t
             t.setVolume(0f)
             t.play()
-            fadeTo(if (ducked) target * duckFloor(level) else target, FADE_IN)
+            fadeTo(resting, FADE_IN)
             val began = System.currentTimeMillis()
             withContext(Dispatchers.IO) {
                 // The run-in, once.
@@ -292,7 +300,23 @@ class Bed(private val ctx: Context) {
         if (ducked == on) return
         ducked = on
         if (!playing) return
-        fadeTo(if (on) target * duckFloor(level) else target, if (on) DUCK_DOWN else DUCK_UP)
+        if (hushed) return
+        fadeTo(resting, if (on) DUCK_DOWN else DUCK_UP)
+    }
+
+    /**
+     * Silence the bed altogether while the microphone is open, and bring it back after.
+     *
+     * Ducked is not enough here. The duck leaves the music under a voice; this is music
+     * from the phone's speaker going straight into the phone's microphone, where it is all
+     * the recogniser hears of someone saying a verse across the room. Whoever calls this
+     * decides whether the sound is in the room at all: see [Ears.aloud].
+     */
+    fun hush(on: Boolean) {
+        if (hushed == on) return
+        hushed = on
+        if (!playing) return
+        fadeTo(resting, if (on) HUSH_DOWN else DUCK_UP)
     }
 
     private fun fadeTo(to: Float, ms: Int) {
@@ -390,6 +414,8 @@ class Bed(private val ctx: Context) {
         private const val FADE_IN = 1_400
         private const val DUCK_DOWN = 450
         private const val DUCK_UP = 1_800
+        /** Quicker than a duck: the listener is about to speak. */
+        private const val HUSH_DOWN = 200
         /** Only for moving BETWEEN beds; a loop join is never crossfaded. */
         private const val CROSSFADE = 3_000
         /** How long a bed holds the floor before rotation moves on. */

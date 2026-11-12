@@ -39,6 +39,8 @@ class Prefs(ctx: Context) {
     var rate by mutableFloatStateOf(sp.getFloat("rate", 1f))
     /** Whether a chapter read to its end runs on into the next. */
     var readOn by mutableStateOf(sp.getBoolean("readOn", true))
+    /** Whether a verse being learned is listened for, so the voice goes on when it is said. */
+    var hearing by mutableStateOf(sp.getBoolean("hearing", false))
 
     /** The book that was open when the app was left, to open in again; empty for the Bible. */
     var openBook: String
@@ -133,6 +135,7 @@ class Prefs(ctx: Context) {
             .putFloat("bedLevel", bedLevel)
             .putFloat("rate", rate)
             .putBoolean("readOn", readOn)
+            .putBoolean("hearing", hearing)
             .putString("colour", colour)
             .putBoolean("study", study)
             .putBoolean("studyComm", studyCommentary)
@@ -284,6 +287,36 @@ fun SettingsScreen(
                 )
             }
 
+            // The other half of learning a verse by ear: the app hearing it said back.
+            if (modelPresent) {
+                val hear = rememberHearSwitch(prefs)
+                Spacer(Modifier.height(12.dp))
+                Label("Listen for my line when I learn a verse")
+                Row {
+                    listOf(false to "Off", true to "On").forEach { (value, name) ->
+                        val on = hear.on == value
+                        Surface(
+                            onClick = { hear.set(value) },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (on) p.gold.copy(alpha = 0.2f) else Color.Transparent,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (on) p.gold else p.rule),
+                            modifier = Modifier.padding(end = 8.dp),
+                        ) {
+                            Text(
+                                name, fontFamily = UiFont, fontSize = 12.sp, color = p.ink,
+                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
+                            )
+                        }
+                    }
+                }
+                Text(
+                    if (Ears.present(ctx)) "Worked out on this phone. Nothing you say is sent or kept."
+                    else "A download of ${Ears.MEGABYTES} MB. Worked out on this phone: nothing you say is sent or kept.",
+                    fontFamily = UiFont, fontSize = 11.sp, lineHeight = 18.sp, color = p.inkSoft,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+
             Section("Music")
             // The picker itself lives in the player, where it is reached while reading.
             // This is only the download.
@@ -401,7 +434,9 @@ fun SettingsScreen(
                     "Questions adapted from Translation Questions, CC BY-SA 4.0: the answers " +
                     "are left out and the divine name is written as the BSB writes it. " +
                     "The original work by unfoldingWord is available from unfoldingword.org/utq.\n" +
-                    "Speech by Phonon (Gradium), Apache 2.0, generated on this phone.",
+                    "Speech by Phonon (Gradium), Apache 2.0, generated on this phone.\n" +
+                    "Hearing by NVIDIA Parakeet TDT-CTC 110M, CC BY 4.0, and Silero VAD, MIT, run " +
+                    "with sherpa-onnx, Apache 2.0, and ONNX Runtime, MIT, on this phone.",
                 fontFamily = UiFont, fontSize = 11.sp, lineHeight = 19.sp, color = p.inkSoft,
                 modifier = Modifier.padding(bottom = 18.dp),
             )

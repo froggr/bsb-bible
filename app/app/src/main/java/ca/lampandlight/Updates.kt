@@ -181,6 +181,65 @@ object Updates {
     }
 
     /**
+     * Fetch what hearing needs into app storage: the recogniser and the voice detector,
+     * 136 MB, for those who want a verse heard as they say it.
+     *
+     * From the release named in [Ears.BASE], whichever build this is, unless the app has
+     * been pointed at another host, which then serves them from `ears/`. Each file is
+     * checked against the length and SHA-256 written into the app, so what is loaded into
+     * a native library is what was measured and nothing else. A file cut off part way is
+     * taken up where it stopped: the big one is 131 MB, and a second try should not begin
+     * it again.
+     */
+    fun fetchEars(ctx: Context, onProgress: (Long, Long) -> Unit = { _, _ -> }): File {
+        val dir = Ears.dir(ctx).apply { mkdirs() }
+        val base = host(ctx).takeIf { it != DEFAULT_HOST } ?: Ears.BASE
+        val total = Ears.PARTS.sumOf { it.bytes }
+        var done = 0L
+        for (part in Ears.PARTS) {
+            val dest = File(dir, part.name)
+            if (dest.length() == part.bytes) { done += part.bytes; onProgress(done, total); continue }
+            dest.delete()
+            val tmp = File(dir, "${part.name}.part")
+            if (tmp.length() >= part.bytes) tmp.delete()
+            var have = tmp.length()
+            val conn = (URL(resolve(base, "${Ears.DIR}/${part.name}")).openConnection() as HttpURLConnection)
+                .apply {
+                    connectTimeout = 8000; readTimeout = 60000; instanceFollowRedirects = true
+                    if (have > 0) setRequestProperty("Range", "bytes=$have-")
+                }
+            // Asked for the rest and sent all of it: begin again.
+            if (have > 0 && conn.responseCode != HttpURLConnection.HTTP_PARTIAL) { tmp.delete(); have = 0 }
+            conn.inputStream.use { input ->
+                java.io.FileOutputStream(tmp, have > 0).buffered(1 shl 16).use { out ->
+                    val buf = ByteArray(1 shl 16)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n); have += n
+                        onProgress(done + have, total)
+                    }
+                }
+            }
+            val digest = MessageDigest.getInstance("SHA-256")
+            tmp.inputStream().use { input ->
+                val buf = ByteArray(1 shl 16)
+                while (true) { val n = input.read(buf); if (n < 0) break; digest.update(buf, 0, n) }
+            }
+            val got = digest.digest().joinToString("") { "%02x".format(it) }
+            if (tmp.length() != part.bytes || got != part.sha) {
+                tmp.delete()
+                throw IllegalStateException("${part.name} did not arrive whole")
+            }
+            check(tmp.renameTo(dest)) { "could not move ${part.name} into place" }
+            done += part.bytes
+            onProgress(done, total)
+        }
+        Log.i(TAG, "hearing ready in ${dir.path}")
+        return dir
+    }
+
+    /**
      * Fetch the English voices into `<model>/voices/`, where Phonon looks for them.
      *
      * Each file is named after the voice, because Phonon takes the name from the filename:

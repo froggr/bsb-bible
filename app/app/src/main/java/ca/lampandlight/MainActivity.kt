@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
     private var bible: Bible? = null
     private var narrator: Narrator? = null
     private var bed: Bed? = null
+    private var ears: Ears? = null
     private var questions: Questions? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,6 +84,7 @@ class MainActivity : ComponentActivity() {
                     bible = b
                     narrator = Narrator(this@MainActivity)
                     bed = Bed(this@MainActivity)
+                    ears = Ears(this@MainActivity)
                     ready = b
                 } catch (e: Throwable) {
                     failed = e.message ?: e::class.simpleName
@@ -105,7 +107,7 @@ class MainActivity : ComponentActivity() {
 
                     b == null -> Box(Modifier.fillMaxSize().background(p.paper))
 
-                    else -> App(b, narrator!!, bed!!, prefs, questions)
+                    else -> App(b, narrator!!, bed!!, ears!!, prefs, questions)
                 }
             }
         }
@@ -165,13 +167,14 @@ class MainActivity : ComponentActivity() {
             ReadingService.hold = null
         }
         narrator?.close()
+        ears?.release()
         bed?.pause()
         bible?.close()
     }
 }
 
 @Composable
-private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs, questions: Questions?) {
+private fun App(bible: Bible, narrator: Narrator, bed: Bed, ears: Ears, prefs: Prefs, questions: Questions?) {
     val state = remember { ReaderState(bible, prefs.place, questions) }
     var picking by remember { mutableStateOf(false) }
     var studying by remember { mutableStateOf<Pair<VerseId, Int?>?>(null) }
@@ -369,6 +372,8 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs, questi
     }
     // Hold the music down while a verse is sounding, and let it up between them.
     LaunchedEffect(narrator.speaking) { bed.duck(narrator.speaking) }
+    // The microphone is open for a line to be said: music in the room would be all it heard.
+    LaunchedEffect(ears.listening) { bed.hush(ears.listening && Ears.aloud(ctx)) }
 
     // Look for a newer build in the background, and offer it once it is downloaded and
     // checksummed. Never mid-reading: an installer prompt over a chapter is an ambush.
@@ -655,6 +660,8 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs, questi
                 bible = bible,
                 questions = q,
                 narrator = narrator,
+                ears = ears,
+                prefs = prefs,
                 start = saying,
                 onRead = { v ->
                     screen = "read"; narrator.reset(); state.go(v.book, v.chapter, at = v.verse)

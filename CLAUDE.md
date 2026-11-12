@@ -310,7 +310,9 @@ voice died at the second level, where the reference is a line by itself. Guard a
 `clause.range`.
 
 **Listening is not logged, only "I had it" and "Not yet".** The hands-free pass cannot know
-whether anything was said, so it moves no verse along. Nothing uses the microphone.
+whether anything was said, so it moves no verse along. Since 0.52 the card can hear a line
+(see *Hearing* below), and that is not logged either: being heard ends the turn and marks
+nobody.
 
 **Making a passage longer starts it again; making it shorter does not.** `heart.since` is the
 time from which `said` rows count. `Questions.stretch` moves it only when the passage grows,
@@ -326,6 +328,55 @@ any change to `JOINS`, `HELPS`, `PLACES` or `LONG`.
 **The verse panel scrolls within itself.** Six verses in the largest type are taller than the
 screen, and with the page scrolling instead the cue and the buttons left it. The panel is
 capped at the screen less 350 dp and keeps the sounding line in view with a margin.
+
+## Hearing
+
+**Joe's phone is GrapheneOS: there is no Google speech service and `SpeechRecognizer` is not
+an option.** Hearing is sherpa-onnx with NVIDIA's Parakeet TDT-CTC 110M and Silero VAD, the
+way his herdvoice app does it, all on the phone. `Ears` owns the models and the microphone,
+`Heard` is the matcher, `Hearing.kt` the mark and the sheet.
+
+**The 136 MB of models are release assets on one named tag, `v0.52`, not on `latest`**
+(`Ears.BASE`). **Never delete the v0.52 release**, and a later release does not need to carry
+them again. Their names on the release are `ears-<file>`; a host that is not the default
+serves them at `<host>/ears/<file>`. `Updates.fetchEars` checks each length and SHA-256
+against `Ears.PARTS`, so a replaced file is refused, not used.
+
+**The native libraries are packed compressed (`useLegacyPackaging = true`)** or the APK is
+about 22 MB larger, 62 MB against 40. `app/app/libs/sherpa-onnx-1.13.7.jar` is the classes from the stock AAR and
+the four `.so` files under `jniLibs/` are its libraries; nothing is built from source.
+
+**The matcher is forgiving on purpose, and it only ever answers "was that the line".**
+`Heard.said` wants six tenths of the words, allows near spellings and homophones, and for a
+long passage also wants its end. It was tuned on 5,460 measured pairs (`HEARD_PAIRS` re-runs
+them): about 0.4% of wrong lines pass. Do not tighten it to stop that. A turn that will not
+end because a child said "shepard" costs more than one that ends early, and nothing is marked
+either way. "Go on" stays on the card for the same reason.
+
+**Hearing marks nobody and writes nothing.** No row, no score, no recording kept. Only
+"I had it" and "Not yet" move a verse, as before.
+
+**The recogniser is touched only on the `ears` worker thread; the `mic` lock guards only the
+detector** and is held for a whole turn. Taking that lock in `decode` deadlocks: nothing is
+worked out until the turn ends.
+
+**The microphone is closed when the app leaves the screen** (`LifecycleStartEffect` in
+`HeartCard`), because composition cannot be relied on to do it there, and opened again on the
+way back. The bed is silenced, not ducked, while it is open and nothing is plugged in
+(`Bed.hush`, `Ears.aloud`): music from the speaker is all the microphone would hear.
+
+**The emulators have no microphone. A debuggable build reads `ears/<n>.wav` from the app's
+external files in its place** for the n-th turn since the models loaded (16 kHz, mono, 16
+bit). Files pushed with adb belong to the shell and the app cannot see them: after pushing,
+
+    adb shell 'su 0 chown -R <app uid>:1078 /data/media/0/Android/data/ca.lampandlight/files/ears'
+
+or the app quietly opens the silent microphone and the test looks like a dead recogniser.
+A release build ignores the files. **A real voice through a real microphone had never been
+tried when 0.52 shipped**: the recordings were the Mac's `say` voices.
+
+**`adb devices` may list a real Pixel 9 beside the two emulators.** Set `ANDROID_SERIAL` on
+every call; a bare `adb` then fails with "more than one device", which is the better outcome.
 
 ## Where things are
 

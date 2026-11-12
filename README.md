@@ -46,9 +46,11 @@ Needs Android 10 or newer, and about 120 MB free once the voice is downloaded.
   Questions.
 - **Learn a verse by heart, by ear.** Hold a verse and choose *Learn by heart*; add the verses
   after it, up to six, to make it a passage. The voice says it a phrase at a time and waits
-  for you to say each one back: press *Go on* when you have. The next day only the first letter of every word shows,
-  then nothing but the blanks, and it comes back after longer and longer as you keep it. You
-  say whether you had it; nothing listens to you. *Listen, and say them with the voice* goes
+  for you to say each one back: press *Go on* when you have. Or tap the microphone beside the
+  cue and it hears you say the line and goes on by itself. That is worked out on the phone:
+  what you say is sent nowhere and not kept, and it marks nothing. The next day only the
+  first letter of every word shows, then nothing but the blanks, and it comes back after
+  longer and longer as you keep it. You say whether you had it. *Listen, and say them with the voice* goes
   through everything you are learning with the screen off, for the car or the dishes; there
   it leaves a silence the length of the phrase and goes on by itself.
 - **It asks where things are.** Before you carry on in a book, the page asks what the last
@@ -82,6 +84,7 @@ The app works fully offline on first install. From Settings you can add:
 - **study material** — Strong's numbers, cross-references (about 20 MB)
 - **commentary** (about 15 MB)
 - **music beds** — eight instrumental tracks (about 12 MB)
+- **hearing your line** when you learn a verse (about 137 MB)
 
 ## Why it is not on the Play Store
 
@@ -97,6 +100,10 @@ The questions asked in study mode are adapted from unfoldingWord's **Translation
 (CC BY-SA 4.0): only the questions are used, their written answers are left out, and the divine
 name is written as the BSB writes it. The original work is available from
 <https://unfoldingword.org/utq>.
+
+Hearing your line uses NVIDIA's **Parakeet TDT-CTC 110M** speech model (CC BY 4.0) and
+**Silero VAD** (MIT), run on the phone with **sherpa-onnx** (Apache 2.0) and **ONNX Runtime**
+(MIT).
 
 This repository holds the source and the built releases. Questions or problems: open an issue.
 
@@ -436,6 +443,10 @@ contains `/releases/`, and leaves paths alone otherwise, so one manifest serves 
 | `/app.apk` | `app.apk` |
 | `/data/bible-study.db.gz` | `data-bible-study.db.gz` |
 | `/beds/stillness.opus` | `beds-stillness.opus` |
+
+The five files the app needs to hear a line (136 MB) are not in the manifest and not on every
+release. They are assets of **`v0.52` only**, named `ears-encoder.int8.onnx` and so on, and
+the app fetches them from that tag by name (`Ears.BASE`). Do not delete that release.
 
 `gh release create` is flaky with a dozen assets — it has 404'd mid-upload and left a draft.
 Upload per-file with `gh release upload --clobber`, then `gh release edit --draft=false --latest`.

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -36,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -62,6 +64,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleStartEffect
 
 /**
  * A verse set out to be learned: a phrase to a line, the way a poem is set, because a line
@@ -227,10 +230,13 @@ private fun Phrase(
 /**
  * One verse of a round: learned if it is new, said if it is not, and then owned up to.
  *
- * Nothing listens. The reader says the verse aloud, looks, and says whether they had it,
+ * Nobody is marked. The reader says the verse aloud, looks, and says whether they had it,
  * and is believed. The voice is offered and never starts by itself: it may be a quiet room.
  * Where it leaves the reader a turn it waits to be told to go on, however long that is: a
  * child sounding a line out is not hurried, and someone who has it is not kept waiting.
+ * With hearing switched on the telling can be the line itself: [ears] listens for it during
+ * the turn and the voice goes on when it has been said. The button stays, for the line the
+ * recogniser will not hear, and whether the verse was known is still the reader's to say.
  *
  * [slot] is the verse's place in whatever the voice is reading, so it can tell its own
  * phrases from another verse's. [said] is the answer given, or null while it is open.
@@ -240,6 +246,8 @@ fun HeartCard(
     item: GoOver.Item.Verse,
     slot: Int,
     narrator: Narrator,
+    ears: Ears,
+    prefs: Prefs,
     said: Int?,
     /** "tomorrow", "in 3 days": when it is next due if it was had. */
     back: String,
@@ -265,6 +273,54 @@ fun HeartCard(
     }
     DisposableEffect(item.heart.verse) { onDispose { if (narrator.alone) narrator.stop() } }
 
+    // The turn can be heard as well as tapped away, where that has been asked for. The
+    // line being waited for is known, so all that is asked of the recogniser is whether
+    // that was it. Hearing ends the turn and nothing more: it marks nobody.
+    val hear = rememberHearSwitch(prefs)
+    LaunchedEffect(hear.on) { if (hear.on) ears.load() }
+    val want = when {
+        !held || said != null -> null
+        at == ByHeart.WHOLE -> item.phrases.joinToString(" ")
+        else -> item.phrases.getOrNull(at)
+    }
+    // Something was said that was not the line, and it has gone quiet since.
+    var tries by remember { mutableIntStateOf(0) }
+    var again by remember { mutableStateOf(false) }
+    // The page is not drawn again while the app is put away, so nothing above would let
+    // the microphone go. It is closed here, and the turn is asked for again on the way back.
+    var shown by remember { mutableStateOf(true) }
+    var visits by remember { mutableIntStateOf(0) }
+    LifecycleStartEffect(ears) {
+        if (!shown) { shown = true; visits++ }
+        onStopOrDispose { shown = false; ears.stop() }
+    }
+    DisposableEffect(want, hear.on, ears.loaded, shown, visits) {
+        tries = 0; again = false
+        if (want == null || !shown || !hear.on || !ears.loaded) return@DisposableEffect onDispose { }
+        val line = Heard.words(want)
+        val got = ArrayList<String>()
+        val turn = at
+        ears.listen { text ->
+            got += Heard.words(text)
+            // Said in two breaths it comes in two parts. Said five times, only the last
+            // few goes are worth weighing.
+            while (got.size > line.size * 3 + 12) got.removeAt(0)
+            if (Heard.said(line, got)) {
+                seen = if (turn == ByHeart.WHOLE) all else seen + turn
+                narrator.goOn()
+            } else tries++
+        }
+        onDispose { ears.stop() }
+    }
+    LaunchedEffect(tries) {
+        if (tries == 0) return@LaunchedEffect
+        // Not at once: a line said in two breaths is not a line got wrong.
+        kotlinx.coroutines.delay(1300)
+        if (!ears.voiced) again = true
+    }
+    LaunchedEffect(ears.voiced) { if (ears.voiced) again = false }
+    val heard = held && ears.listening
+
     Column(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 22.dp)) {
         Text(
             when {
@@ -284,10 +340,14 @@ fun HeartCard(
             onTap = if (said == null) { i -> seen = seen + i } else null,
         )
         Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.Top) {
         Cue(
             when {
                 said == Quiz.RIGHT -> "It comes back $back."
                 said != null -> "It will come back in a few minutes."
+                heard && again -> "Say it once more, or go on."
+                heard && !trying -> "Your turn. Say it back."
+                heard -> "Your turn. Say it."
                 held && !trying -> "Your turn. Say it back, then go on."
                 held -> "Your turn. Say it, then hear it."
                 hush && !trying -> "Your turn. Say it back."
@@ -298,7 +358,14 @@ fun HeartCard(
                 else -> "Say it aloud. The first letters are there to lean on. Tap a line to see it."
             },
             yours = hush && said == null,
+            modifier = Modifier.weight(1f),
         )
+        // Where the eye already is when it is your turn. Only with a voice to take turns with.
+        if (said == null && narrator.modelReady()) HearMark(
+            on = hear.on, listening = heard, voiced = ears.voiced,
+            modifier = Modifier.offset(x = 9.dp, y = (-10).dp),
+        ) { hear.set(!hear.on) }
+        }
         if (said == null) {
             Spacer(Modifier.height(20.dp))
             // As tall as its tallest button whatever it holds, so nothing moves as they change.
@@ -346,7 +413,7 @@ fun HeartCard(
 
 /** The line under a verse that says what to do. It turns gold when it is the listener's turn. */
 @Composable
-fun Cue(text: String, yours: Boolean) {
+fun Cue(text: String, yours: Boolean, modifier: Modifier = Modifier) {
     val p = LocalPalette.current
     val colour by animateColorAsState(if (yours) p.gold else p.inkSoft, tween(220), label = "cue")
     Text(
@@ -354,7 +421,7 @@ fun Cue(text: String, yours: Boolean) {
         fontWeight = if (yours) FontWeight.SemiBold else FontWeight.Normal,
         // Two lines always, so the buttons under it do not move when the words change.
         minLines = 2,
-        modifier = Modifier.padding(horizontal = 2.dp),
+        modifier = modifier.padding(horizontal = 2.dp),
     )
 }
 
