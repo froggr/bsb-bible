@@ -195,13 +195,19 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs, questi
                 epubOf(cold) == null) "book" else "read"
         )
     }
-    // How many verses and questions are due to be gone over, counted afresh whenever the
-    // menu opens.
-    var due by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    // How many verses, questions and chapters are due to be gone over, counted afresh
+    // whenever the menu opens.
+    var due by remember { mutableStateOf<GoOver.Waiting?>(null) }
     LaunchedEffect(screen) {
         if (screen == "menu" && questions != null) {
             due = withContext(Dispatchers.IO) { GoOver.waiting(questions) }
         }
+    }
+    // What has been read and called to mind, for the map in the list of books. Read afresh
+    // each time the list opens.
+    var places by remember { mutableStateOf<Map<Int, Place>>(emptyMap()) }
+    LaunchedEffect(picking) {
+        if (picking && questions != null) places = withContext(Dispatchers.IO) { questions.places() }
     }
     // A verse just taken up to learn, when Go over is to open on it.
     var saying by remember { mutableStateOf<VerseId?>(null) }
@@ -330,6 +336,9 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs, questi
             // moment the narrator is not speaking but is not finished either: it says so
             // ([Narrator.carrying]) until told here that the matter is settled, so that
             // nothing lets go of the reading in between.
+            // The voice has been through a chapter of the Bible: that is a reading of it,
+            // and the next chapter opens by asking what was in it.
+            if (!(screen == "book" && s != null)) state.finished()
             val next: (suspend () -> List<Narrator.Line>)? = when {
                 !prefs.readOn -> null
                 screen == "book" && s != null ->
@@ -672,6 +681,7 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs, questi
     if (picking) ChapterPicker(
         bible = bible,
         current = state.book,
+        places = places,
         onPick = { b, c -> picking = false; narrator.reset(); state.go(b, c) },
         onDismiss = { picking = false },
     )

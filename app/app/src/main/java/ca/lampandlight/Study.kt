@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
@@ -17,6 +18,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -307,12 +311,15 @@ private fun CommentaryPane(comm: List<Commentary>) {
 fun ChapterPicker(
     bible: Bible,
     current: Int,
+    /** What has been read and called to mind, by [Places.key]. Empty leaves the list plain. */
+    places: Map<Int, Place> = emptyMap(),
     onPick: (Int, Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val p = LocalPalette.current
     var chosen by remember { mutableStateOf<Book?>(null) }
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val read = p.ink.copy(alpha = 0.42f)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -325,8 +332,20 @@ fun ChapterPicker(
             Text(
                 b?.name ?: "Go to",
                 fontFamily = DisplayFont, fontSize = 22.sp, fontWeight = FontWeight.SemiBold,
-                color = p.ink, modifier = Modifier.padding(bottom = 14.dp),
+                color = p.ink, modifier = Modifier.padding(bottom = if (places.isEmpty()) 14.dp else 4.dp),
             )
+            // The key to the map, once there is anything on it.
+            if (places.isNotEmpty()) Row(
+                Modifier.padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.width(14.dp).height(2.dp).background(read))
+                Text(
+                    "  Read", fontFamily = UiFont, fontSize = 11.sp, color = p.inkSoft,
+                    modifier = Modifier.padding(end = 16.dp),
+                )
+                Box(Modifier.width(14.dp).height(2.dp).background(p.gold))
+                Text("  Known from memory", fontFamily = UiFont, fontSize = 11.sp, color = p.inkSoft)
+            }
             if (b == null) {
                 LazyColumn {
                     items(bible.books) { book ->
@@ -347,21 +366,46 @@ fun ChapterPicker(
                                 fontFamily = MonoFont, fontSize = 11.sp, color = p.inkSoft,
                             )
                         }
-                        Box(Modifier.fillMaxWidth().height(1.dp).background(p.rule))
+                        // The rule under a book is the book laid end to end: a part of it
+                        // for each chapter, heavier where it has been read and gold where
+                        // it is known. Sixty-six of them are the map.
+                        Box(
+                            Modifier.fillMaxWidth().height(2.dp).drawBehind {
+                                val line = 1.dp.toPx()
+                                drawRect(p.rule, Offset(0f, size.height - line), Size(size.width, line))
+                                val part = size.width / book.chapters
+                                for (c in 1..book.chapters) {
+                                    val place = places[Places.key(book.id, c)] ?: continue
+                                    drawRect(
+                                        if (place.known) p.gold else read,
+                                        Offset((c - 1) * part, 0f), Size(part, size.height),
+                                    )
+                                }
+                            },
+                        )
                     }
                 }
             } else {
+                val headings = remember(b.id) { bible.headings(b.id) }
+                val known = (1..b.chapters).filter { places[Places.key(b.id, it)]?.known == true }
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(54.dp),
                     horizontalArrangement = Arrangement.spacedBy(9.dp),
                     verticalArrangement = Arrangement.spacedBy(9.dp),
                 ) {
                     items(b.chapters) { i ->
+                        val place = places[Places.key(b.id, i + 1)]
                         Surface(
                             onClick = { onPick(b.id, i + 1) },
                             shape = RoundedCornerShape(8.dp),
-                            color = Color.Transparent,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, p.rule),
+                            color = when {
+                                place == null -> Color.Transparent
+                                place.known -> p.gold.copy(alpha = 0.16f)
+                                else -> p.ink.copy(alpha = 0.07f)
+                            },
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp, if (place?.known == true) p.gold.copy(alpha = 0.75f) else p.rule,
+                            ),
                         ) {
                             Text(
                                 "${i + 1}",
@@ -369,6 +413,38 @@ fun ChapterPicker(
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.padding(vertical = 13.dp).fillMaxWidth(),
                             )
+                        }
+                    }
+                    // What the reader can say of the book without looking, chapter by
+                    // chapter. Only what is known is written out: the rest is still to do.
+                    if (known.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            Text(
+                                "WHAT YOU KNOW OF IT", fontFamily = UiFont, fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp, color = p.gold,
+                                modifier = Modifier.padding(top = 20.dp),
+                            )
+                        }
+                        items(known.size, span = { GridItemSpan(maxLineSpan) }) { k ->
+                            val c = known[k]
+                            Row(
+                                Modifier.fillMaxWidth().clickable { onPick(b.id, c) }.padding(vertical = 3.dp),
+                            ) {
+                                Text(
+                                    "$c", fontFamily = DisplayFont, fontSize = 19.sp,
+                                    fontWeight = FontWeight.SemiBold, color = p.gold,
+                                    modifier = Modifier.width(38.dp),
+                                )
+                                Column {
+                                    Places.outline(headings[c].orEmpty()).forEach { h ->
+                                        Text(
+                                            h, fontFamily = DisplayFont, fontSize = 18.sp,
+                                            fontWeight = FontWeight.Medium, color = p.ink,
+                                            modifier = Modifier.padding(bottom = 3.dp),
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

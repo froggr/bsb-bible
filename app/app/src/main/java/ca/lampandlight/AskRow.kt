@@ -111,20 +111,25 @@ fun AskRow(
                 }
             }
             // The time the voice will wait, running out along the foot of the panel.
-            if (waiting && !settled) {
-                val left = remember(row.key) { Animatable(1f) }
-                LaunchedEffect(waitFrom, waitFor) {
-                    val gone = SystemClock.elapsedRealtime() - waitFrom
-                    left.snapTo((1f - gone.toFloat() / waitFor).coerceIn(0f, 1f))
-                    left.animateTo(
-                        0f, tween((waitFor - gone).coerceAtLeast(0L).toInt(), easing = LinearEasing),
-                    )
-                }
-                Box(Modifier.fillMaxWidth().height(2.dp).background(p.rule)) {
-                    Box(Modifier.fillMaxWidth(left.value).height(2.dp).background(p.gold))
-                }
-            }
+            if (waiting && !settled) WaitBar(row.key, waitFrom, waitFor)
         }
+    }
+}
+
+/** The time the voice will wait, running out along the foot of a panel. */
+@Composable
+internal fun WaitBar(key: String, waitFrom: Long, waitFor: Long) {
+    val p = LocalPalette.current
+    val left = remember(key) { Animatable(1f) }
+    LaunchedEffect(waitFrom, waitFor) {
+        val gone = SystemClock.elapsedRealtime() - waitFrom
+        left.snapTo((1f - gone.toFloat() / waitFor).coerceIn(0f, 1f))
+        left.animateTo(
+            0f, tween((waitFor - gone).coerceAtLeast(0L).toInt(), easing = LinearEasing),
+        )
+    }
+    Box(Modifier.fillMaxWidth().height(2.dp).background(p.rule)) {
+        Box(Modifier.fillMaxWidth(left.value).height(2.dp).background(p.gold))
     }
 }
 

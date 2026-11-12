@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /* The reading screen. One column, nothing between the reader and the text: the chrome
@@ -139,8 +140,30 @@ fun Reader(
     // chapter rather than to its first verse.
     LaunchedEffect(list) {
         snapshotFlow { list.firstVisibleItemIndex }.collect { i ->
-            (state.rows.getOrNull(i) as? Row.Verse)?.let { state.topVerse = it.verse.id.verse }
+            // The head of the chapter is a place too: left there, it is where to come back
+            // to, with whatever stands above the first verse.
+            if (i == 0) { if (state.topVerse != 0) state.topVerse = 0 }
+            else (state.rows.getOrNull(i) as? Row.Verse)?.let { state.topVerse = it.verse.id.verse }
         }
+    }
+
+    // A chapter opened at its head starts at the top of the page, wherever the last one
+    // was left.
+    LaunchedEffect(state.top) { if (state.top > 0) list.scrollToItem(0) }
+
+    // Reaching the foot of a chapter that has been open long enough to have been read is
+    // reading it. The first moments are not looked at: the list still holds the place it
+    // had in the chapter before.
+    LaunchedEffect(state.book, state.chapter) {
+        val began = android.os.SystemClock.elapsedRealtime()
+        kotlinx.coroutines.delay(800)
+        snapshotFlow {
+            val rows = state.rows.size
+            rows > 0 && (list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1) >= rows
+        }.first { it }
+        val left = Places.enough(state.verses.size) - (android.os.SystemClock.elapsedRealtime() - began)
+        if (left > 0) kotlinx.coroutines.delay(left)
+        state.finished()
     }
 
     // Land on the verse a jump asked for, once the new chapter has been laid out.
@@ -196,12 +219,15 @@ fun Reader(
     LaunchedEffect(narrator.posed) {
         val key = narrator.posed ?: return@LaunchedEffect
         if (!voiced) return@LaunchedEffect
-        val target = state.rows.indexOfFirst { it is Row.Ask && it.asked.question.key == key }
+        val target = if (key == Places.KEY) state.rows.indexOfFirst { it is Row.Recall }
+                     else state.rows.indexOfFirst { it is Row.Ask && it.asked.question.key == key }
         if (target < 0) return@LaunchedEffect
         val info = list.layoutInfo
         val item = info.visibleItemsInfo.firstOrNull { it.index == target }
         val clear = info.viewportEndOffset - with(density) { (playerHeight + 22.dp).roundToPx() }
-        if (item == null || item.offset + item.size > clear) list.animateScrollToItem(target, -90)
+        // Above the screen too: a row can be in the list's layout and wholly under the top
+        // bar, in the space the content padding keeps for it.
+        if (item == null || item.offset < 0 || item.offset + item.size > clear) list.animateScrollToItem(target, -90)
     }
 
     /**
@@ -310,6 +336,20 @@ fun Reader(
                             onChoose = { chromeVisible = true; state.answer(key, it) },
                         )
                     }
+                    is Row.Recall -> RecallPanel(
+                        label = "Before you go on",
+                        question = Places.asks(row.name.substringBeforeLast(' '), row.place.number),
+                        headings = row.headings,
+                        lifted = state.lifted,
+                        outcome = state.recalled,
+                        after = if (state.recalled == Quiz.RIGHT) "It comes back ${state.recallBack}, in Go over."
+                                else "It will come back in a few minutes, in Go over.",
+                        waiting = voiced && narrator.asking == Places.KEY,
+                        waitFrom = narrator.askedAt,
+                        waitFor = narrator.askFor,
+                        onLift = { chromeVisible = true; state.lift(it) },
+                        onSaid = { chromeVisible = true; state.recall(it) },
+                    )
                     // Drawn once under the last verse it covers, labelled with the span
                     // and bracketed from its first verse, the same way as a note.
                     is Row.Comment -> CommentRow(
@@ -377,8 +417,10 @@ fun Reader(
             TopBar(
                 label = "${book?.name ?: ""} ${state.chapter}",
                 onPick = onOpenPicker,
-                onPrev = { scope.launch { state.previousChapter() } },
-                onNext = { scope.launch { state.nextChapter() } },
+                // Like the picker: the place to carry on from is a line of the chapter being
+                // left, and would be read as a line of the one arrived at.
+                onPrev = { narrator.reset(); scope.launch { state.previousChapter() } },
+                onNext = { narrator.reset(); scope.launch { state.nextChapter() } },
                 onSearch = onSearch,
                 onMenu = onMenu,
                 onBooks = onBooks,
@@ -1072,7 +1114,8 @@ internal fun PlayerBar(
                     Text(
                         when {
                             narrator.preparing -> "warming up…"
-                            narrator.speaking && narrator.verseIndex >= 0 -> reading
+                            // A question put before the first verse is at no verse.
+                            narrator.speaking && (narrator.verseIndex >= 0 || narrator.posed != null) -> reading
                             narrator.error != null -> narrator.error!!
                             narrator.resumeAt > 0 && resume != null -> resume
                             else -> idle

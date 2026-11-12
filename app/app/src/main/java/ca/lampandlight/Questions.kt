@@ -341,6 +341,56 @@ class Questions private constructor(
         }
     }
 
+    // ------------------------------------------------------------- places
+
+    /**
+     * [chapter] (see [Places.key]) was read through. Reaching the foot of the page and the
+     * voice finishing can both report the same reading, so one inside ten minutes of the
+     * last is the same one.
+     */
+    fun finished(chapter: Int, at: Long = System.currentTimeMillis()) {
+        val db = mine ?: return
+        runCatching {
+            val last = db.rawQuery("SELECT MAX(at) FROM read WHERE chapter = ?", arrayOf(chapter.toString()))
+                .use { c -> if (c.moveToNext() && !c.isNull(0)) c.getLong(0) else 0L }
+            if (at - last > 10 * 60_000L)
+                db.execSQL("INSERT INTO read(chapter, at) VALUES (?,?)", arrayOf<Any>(chapter, at))
+        }
+    }
+
+    /** What was in [chapter] was there when asked for ([Quiz.RIGHT]) or was not ([Quiz.WRONG]). */
+    fun recalled(chapter: Int, outcome: Int, at: Long = System.currentTimeMillis()) {
+        runCatching {
+            mine?.execSQL(
+                "INSERT INTO recalled(chapter, at, outcome) VALUES (?,?,?)", arrayOf<Any>(chapter, at, outcome),
+            )
+        }
+    }
+
+    /** Every chapter that has been read through, by its key. */
+    fun places(): Map<Int, Place> = places(null)
+
+    /** One chapter, or null when it has not been read through. */
+    fun place(chapter: Int): Place? = places(chapter)[chapter]
+
+    private fun places(only: Int?): Map<Int, Place> {
+        val db = mine ?: return emptyMap()
+        val where = if (only != null) " WHERE chapter = $only" else ""
+        return runCatching {
+            val history = HashMap<Int, MutableList<Past>>()
+            db.rawQuery("SELECT chapter, outcome, at FROM recalled$where ORDER BY at", null).use { c ->
+                while (c.moveToNext())
+                    history.getOrPut(c.getInt(0)) { mutableListOf() }.add(Past(c.getInt(1), c.getLong(2)))
+            }
+            db.rawQuery("SELECT chapter, MAX(at) FROM read$where GROUP BY chapter", null).use { c ->
+                buildMap {
+                    while (c.moveToNext())
+                        put(c.getInt(0), Place(c.getInt(0), c.getLong(1), history[c.getInt(0)].orEmpty()))
+                }
+            }
+        }.getOrElse { emptyMap() }
+    }
+
     companion object {
         private const val TAG = "Questions"
         private const val ASSET = "questions.db"
@@ -372,6 +422,13 @@ class Questions private constructor(
                     )
                     it.execSQL("CREATE TABLE IF NOT EXISTS said(verse INTEGER NOT NULL, at INTEGER NOT NULL, outcome INTEGER NOT NULL)")
                     it.execSQL("CREATE INDEX IF NOT EXISTS said_verse ON said(verse, at)")
+                    it.execSQL("CREATE TABLE IF NOT EXISTS read(chapter INTEGER NOT NULL, at INTEGER NOT NULL)")
+                    it.execSQL("CREATE INDEX IF NOT EXISTS read_chapter ON read(chapter, at)")
+                    it.execSQL(
+                        "CREATE TABLE IF NOT EXISTS recalled(chapter INTEGER NOT NULL, at INTEGER NOT NULL, " +
+                            "outcome INTEGER NOT NULL)"
+                    )
+                    it.execSQL("CREATE INDEX IF NOT EXISTS recalled_chapter ON recalled(chapter, at)")
                 }
             }.getOrElse { Log.w(TAG, "answers not kept: ${it.message}"); null }
             return Questions(asked, mine)

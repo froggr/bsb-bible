@@ -322,6 +322,49 @@ any change to `JOINS`, `HELPS`, `PLACES` or `LONG`.
 screen, and with the page scrolling instead the cue and the buttons left it. The panel is
 capped at the screen less 350 dp and keeps the sounding line in view with a margin.
 
+## Where things are
+
+**What is asked for is the text's own section headings, never a summary.** Nothing is written
+for this. `Places.title` cleans a heading line with plain string work, no regex, and drops
+what is not a section: "BOOK II Psalms 42–72 " in front of five psalms, the Hebrew letters of
+Psalm 119 (so that psalm is one heading, not twenty-two), and the Song of Songs' speakers,
+which the reading text stores as headings and four times runs on to the heading before
+("Solomon Admires His BrideThe Bridegroom"). That last is a defect in `bible-reading.db`
+itself and is still on the page. Every one of the 1,189 chapters keeps at least one heading;
+re-run that check after any change to `title`.
+
+**The look back is planned once, when the chapter loads (`lookBack()`), like the questions.**
+It asks about the chapter BEFORE the one opened, across books, and only when that chapter has
+been read and is due. In `rebuild()` it would vanish under the reader's finger the moment it
+was rated.
+
+**Hearing is not logged.** When nobody answers, the voice says the headings and the panel
+shows them, and no row is written, the same as listening to a verse by heart. Only
+"I had it" and "Not yet" move a chapter. Looking at every heading stops the voice saying them.
+
+**The two voice lines have verse index -1.** Given 0 they lit verse 1 and the page scrolled
+the panel away to show it. Anything that reads `Line.verse` or `narrator.verseIndex` must
+allow for a line at no verse; the player's label and `verseOfLine` already do.
+
+**A chapter is read at its foot, after `Places.enough(verses)`, or when the voice ends it.**
+With study on even Psalm 117 is longer than a screen, so a test has to scroll to the foot and
+wait. `finished()` writes at once, not in the background, because the next chapter opens
+straight after and has to find this one read.
+
+**A chapter opened at its head scrolls to the top (`ReaderState.top`).** Before 0.50 nothing
+did, and the next chapter opened as far down as the last was left. `go()` also sets
+`topVerse` itself, or the last chapter's top verse is saved as this one's place.
+
+**A row can be in the list's layout and wholly under the top bar.** The reader's list keeps
+the bar's height as content padding, and a row scrolled into that space is still "visible" to
+`layoutInfo` with a negative offset. Switching Study on at the head of a chapter put the panel
+there, because the list holds on to the row it was showing, and the voice then asked about a
+panel nobody could see. `rebuild()` raises `top` when the panel arrives above a page at its
+head, and anything that brings a row into view must test `offset < 0` as well as `null`.
+
+**The map shows no numbers.** Joe asked for no scores that shame. The rule under a book is
+drawn in as many parts as it has chapters; do not add a count or a percentage to it.
+
 ## Data
 
 **`app/app/src/main/assets/bible-reading.db` is a hand copy of `data/bible-reading.db`.**

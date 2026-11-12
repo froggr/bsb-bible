@@ -50,6 +50,13 @@ Needs Android 10 or newer, and about 120 MB free once the voice is downloaded.
   then nothing but the blanks, and it comes back after longer and longer as you keep it. You
   say whether you had it; nothing listens to you. *Listen, and say them with the voice* goes
   through everything you are learning with the screen off, for the car or the dishes.
+- **It asks where things are.** Before you carry on in a book, the page asks what the last
+  chapter was about, with its section headings covered. Say them to yourself, look, and say
+  whether you had it. With the voice reading, it asks aloud, waits, and then says them. A
+  chapter you had comes back after a week and then less often, under *Go over*. The list of
+  books is the map: the rule under each book is the book laid end to end, heavier where a
+  chapter has been read and gold where you know what is in it, and each book lists what you
+  can say of it from memory. There is no score.
 - **Your own books, on the same page.** Bring in the epubs you already own, a folder at a
   time, and they are set in the same type and read in the same voice as the Bible. Every
   Scripture reference in them opens its passage in a sheet over the page, so the place in
@@ -275,7 +282,7 @@ which question a section asks next (`Quiz.choose`) and when one is due to be gon
 | Note sheet | writing on a verse, with the verse in front of you |
 | Search | full text, debounced, matches emboldened |
 | Marks and notes | everything coloured or written on |
-| Go over | the questions that are due and the verses being learned, eight to a round; the list of verses; the hands-free listen |
+| Go over | the verses being learned, the chapters to call to mind and the questions that are due, eight to a round; the list of verses; the hands-free listen |
 | Books | the shelf: epubs brought in from the phone, with covers, the place kept, sort and filter |
 | Book | one book open: chapter text in the app's own type, narration, citations that open their passage |
 | Settings | text size, theme, voice, study downloads, music, manual update check |
@@ -300,6 +307,17 @@ listener's turn. `ByHeart.phrases` breaks a verse at its punctuation and halves 
 ten words before a joining word; it was tuned by eye against 37 well-known verses, so print
 some before changing its word lists. A practice is spoken with `speak(lines, alone = true)`,
 which leaves the page's own place alone and does not roll into the next chapter.
+
+**Where things are** lives in `Places.kt` (the rules, unit-tested), `RecallRow.kt` (the panel)
+and the picker in `Study.kt` (the map). `learning.db` has two tables for it: `read`, a row
+when a chapter's foot has been on screen after long enough to have read it or the voice has
+finished it, and `recalled`, a row for every "I had it" or "Not yet". A chapter is *known*
+while the last of those was "I had it", and it comes due on the same ladder as a question.
+What is asked for is the chapter's section headings as the text has them, through
+`Places.title`, which leaves out what is on a heading line without being a section: the five
+books of the Psalms, Psalm 119's Hebrew letters, and who is speaking in the Song of Songs.
+The panel is a `Row.Recall` at the head of the next chapter, and its two voice lines use the
+same asking and waiting as a question under the key `Places.KEY`.
 
 **Music beds** play their run-in once and then loop a region of the file forever
 (`Beds.Item.loopStartMs`/`loopEndMs`, found by PyMusicLooper). The region is decoded to PCM once

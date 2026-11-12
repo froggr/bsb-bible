@@ -123,6 +123,23 @@ sealed interface Row {
         /** One passage offered: its words, and where it is ("verse 16", "verses 14\u201315"). */
         data class Choice(val text: String, val where: String)
     }
+    /**
+     * The chapter before this one, asked for from memory before going on. See [Places].
+     *
+     * [headings] are what it is asked for and what is shown when the reader looks. What has
+     * been looked at and what was said of it are in [ReaderState], as a question's answer is.
+     */
+    data class Recall(
+        val place: Place,
+        /** "John 2", as the page writes it. */
+        val name: String,
+        val headings: List<String>,
+        /** The asking and the answer as the voice says them. */
+        val asked: String,
+        val answer: String,
+        override val key: String = "recall",
+        override val margin: Margin = Margin(),
+    ) : Row
 }
 
 /**
@@ -437,6 +454,14 @@ class ReaderState(
     }
 
     /**
+     * Counts the chapters opened at their head, for the reader to return to the top of the
+     * page. The list keeps its place by row, and the rows of a new chapter are not the old
+     * ones, so without this the next chapter opened as far down as the last was left.
+     */
+    var top by mutableIntStateOf(0)
+        private set
+
+    /**
      * Open a chapter.
      *
      * [remember] records where we were, so this can be stepped back out of; the back step
@@ -453,7 +478,10 @@ class ReaderState(
         this.chapter = chapter
         load()
         pending = at
-        remember()
+        if (at <= 0) top++
+        // Not the verse that was at the top of the chapter just left: that would be
+        // written down as the place in this one.
+        topVerse = at.coerceAtLeast(0)
     }
 
     /** Return to where the last link was followed from. Returns false when there is nowhere. */
@@ -497,6 +525,7 @@ class ReaderState(
         // The chapter changed, so last chapter's commentary must not show against it.
         commentary = emptyList(); refs = emptyMap(); studyFor = null
         plan()
+        lookBack()
         loadMarks()          // lays the chapter out; notes are rows, so they must be known
         if (study) fetchStudy()
     }
@@ -537,6 +566,15 @@ class ReaderState(
             .any { it.start <= v && (if (beyond) it.end > v else it.end >= v) }
         // Questions are a layer of study mode, keyed by the verse they follow.
         val asking = if (study && layers.questions) asked.associateBy { it.after } else emptyMap()
+
+        // What the chapter before was about, asked at the head of this one.
+        if (study && layers.questions) looking?.let {
+            // Arriving above a page that stands at its head (study or the questions switched
+            // on), it would be laid out above the screen: the list holds on to the row it was
+            // showing. A reader further down the chapter is left where they are.
+            if (rows.firstOrNull() !is Row.Recall && topVerse == 0) top++
+            out += it
+        }
 
         verses.forEachIndexed { i, v ->
             // A heading between two verses carries whatever spans both of them.
@@ -645,6 +683,72 @@ class ReaderState(
         )
     }
 
+    // ------------------------------------------------------------------ places
+
+    /**
+     * The chapter before this one, when it has been read and is due to be asked for.
+     * Settled when the chapter is opened, for the reason [asked] is: it must not appear
+     * or go while the page is being read.
+     */
+    private var looking: Row.Recall? = null
+
+    /** Which of its headings have been looked at. */
+    var lifted by mutableStateOf<Set<Int>>(emptySet())
+        private set
+
+    /** What the reader said of it, [Quiz.RIGHT] or [Quiz.WRONG]; null until they have. */
+    var recalled by mutableStateOf<Int?>(null)
+        private set
+
+    /** When it will be asked for again, as a person says it; set with [recalled]. */
+    var recallBack by mutableStateOf("")
+        private set
+
+    private fun lookBack() {
+        lifted = emptySet(); recalled = null; recallBack = ""
+        looking = null
+        val q = questions ?: return
+        val (b, c) = Places.before(book, chapter, bible.books.map { it.chapters })
+        val place = q.place(Places.key(b, c))?.takeIf { it.due <= System.currentTimeMillis() } ?: return
+        val headings = Places.outline(bible.headings(b, c)).takeIf { it.isNotEmpty() } ?: return
+        val name = bible.books[b - 1].name
+        looking = Row.Recall(
+            place = place, name = "$name $c", headings = headings,
+            asked = Places.asks(name, c, spoken = true),
+            answer = headings.joinToString(". ") + ".",
+        )
+    }
+
+    /** Look at heading [i] of the chapter asked for, or with null at all of them. */
+    fun lift(i: Int?) {
+        val r = looking ?: return
+        lifted = if (i == null) r.headings.indices.toSet() else lifted + i
+    }
+
+    /** The reader had what was in the chapter asked for, or did not. */
+    fun recall(outcome: Int) {
+        val r = looking ?: return
+        if (recalled != null) return
+        val now = System.currentTimeMillis()
+        lifted = r.headings.indices.toSet()
+        recallBack = GoOver.until(Places.dueAt(r.place.readAt, r.place.history + Past(outcome, now)), now)
+        recalled = outcome
+        questions?.recalled(r.place.chapter, outcome, now)
+    }
+
+    /**
+     * The chapter on the page has been read to its end, by eye or by the voice. Written
+     * down at once and not in the background: the next chapter is opened straight after,
+     * and has to find this one read.
+     */
+    fun finished() {
+        val key = Places.key(book, chapter)
+        if (done == key) return
+        done = key
+        questions?.finished(key)
+    }
+    private var done = 0
+
     /** The reader chose [option] for the question [key]. The first choice is the answer. */
     fun answer(key: String, option: Int) {
         if (key in answers) return
@@ -655,6 +759,9 @@ class ReaderState(
 
     /** Nobody answered [key] and the voice has read the answer: show it on the page too. */
     fun heard(key: String) {
+        // The voice has said what was in the last chapter. Shown, and nothing written
+        // down: nobody is there to say whether they had it.
+        if (key == Places.KEY) { lift(null); return }
         if (key in answers) return
         answers = answers + (key to HEARD)
         questions?.record(key, Quiz.HEARD)
@@ -665,6 +772,16 @@ class ReaderState(
      * question that was only heard counts as not right, and is not asked aloud again.
      */
     fun replied(key: String): Boolean? {
+        // Looking is an answer too: the voice does not read out what is on the page. It
+        // waits the longer beat, though, for the headings just shown to be read.
+        if (key == Places.KEY) {
+            val all = looking?.headings?.size ?: return true
+            return when {
+                recalled != null -> true
+                lifted.size >= all -> false
+                else -> null
+            }
+        }
         val chosen = answers[key] ?: return null
         return asked.firstOrNull { it.question.key == key }?.correct == chosen
     }
@@ -808,6 +925,16 @@ class ReaderState(
                         preamble = right.where.replaceFirstChar { it.uppercase() }
                             .replace("\u2013", " and ") + "."))
                 }
+                // Asked before the chapter begins, then its headings after the same wait
+                // as a question. Both lines always, as with a question, so that the lines
+                // after them keep their numbers. They belong to no verse of this chapter:
+                // given the first, the page lit it and scrolled the panel away to show it.
+                is Row.Recall -> {
+                    add(Narrator.Line(-1, splitWords(row.asked), row.asked,
+                        aside = true, preamble = "Before you go on.", question = Places.KEY))
+                    add(Narrator.Line(-1, splitWords(row.answer), row.answer,
+                        aside = true, answerTo = Places.KEY))
+                }
                 else -> Unit
             }
         }
@@ -834,7 +961,7 @@ class ReaderState(
         narrationLines().indexOfFirst { it.verse == index }.coerceAtLeast(0)
 
     /** The verse, by position in the chapter, that narration line [line] belongs to. */
-    fun verseOfLine(line: Int): Int = narrationLines().getOrNull(line)?.verse ?: line
+    fun verseOfLine(line: Int): Int = (narrationLines().getOrNull(line)?.verse ?: line).coerceAtLeast(0)
 
     /**
      * Open the chapter.

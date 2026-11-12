@@ -5,6 +5,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -53,13 +55,16 @@ import kotlinx.coroutines.withContext
  * is. Nothing is put here that was not first met on the page or chosen by the reader, so
  * this never becomes a quiz on chapters nobody has read, and a round is short enough to
  * finish standing up. Verses being learned by heart come first in it: they are the ones the
- * reader asked for.
+ * reader asked for. Then the chapters to call to mind, which take a breath each, and then
+ * the questions.
  */
 object GoOver {
     /** How many things make a round. More may be due; they wait for the next one. */
     const val ROUND = 8
     /** How many of a round may be verses to say. Saying one takes longer than a question. */
     const val VERSES = 3
+    /** How many may be chapters to call to mind. */
+    const val CHAPTERS = 3
     /** How many verses the voice will go through in one listening. */
     const val LISTEN = 12
 
@@ -78,7 +83,13 @@ object GoOver {
         ) : Item {
             val level: Int get() = heart.level
         }
+
+        /** A chapter to call to mind: what is known of it, and its headings in order. */
+        data class Chapter(val of: Place, override val place: String, val headings: List<String>) : Item
     }
+
+    /** What is due now: verses to say, questions, and chapters to call to mind. */
+    data class Waiting(val verses: Int, val asks: Int, val chapters: Int)
 
     data class Round(val items: List<Item>, val left: Int)
 
@@ -91,8 +102,10 @@ object GoOver {
                 else all.filter { it.due <= now }.sortedBy { it.due }
             }
             val verses = hearts.take(VERSES).mapNotNull { verse(bible, it) }
+            val places = if (only != null) emptyList() else Places.waiting(questions.places().values, now)
+            val chapters = places.take(CHAPTERS).mapNotNull { chapter(bible, it) }
             val due = if (only != null) emptyList() else questions.due(now)
-            val room = ROUND - verses.size
+            val room = ROUND - verses.size - chapters.size
             val asks = due.take(room).mapNotNull { key ->
                 val q = questions.byKey(key) ?: return@mapNotNull null
                 val chapter = runCatching { bible.chapter(q.start.book, q.start.chapter) }.getOrNull()
@@ -108,8 +121,9 @@ object GoOver {
                 )
             }
             Round(
-                verses + asks,
-                (hearts.size - VERSES).coerceAtLeast(0) + (due.size - room).coerceAtLeast(0),
+                verses + chapters + asks,
+                (hearts.size - VERSES).coerceAtLeast(0) + (places.size - CHAPTERS).coerceAtLeast(0) +
+                    (due.size - room).coerceAtLeast(0),
             )
         }
 
@@ -118,9 +132,26 @@ object GoOver {
         questions.hearts().sortedBy { it.due }.mapNotNull { verse(bible, it) }
     }
 
-    /** How many verses and how many questions are due now. */
-    fun waiting(questions: Questions, now: Long = System.currentTimeMillis()): Pair<Int, Int> =
-        questions.hearts().filter { it.due <= now }.sumOf { it.span } to questions.due(now).size
+    /** How much is due now. */
+    fun waiting(questions: Questions, now: Long = System.currentTimeMillis()): Waiting = Waiting(
+        verses = questions.hearts().filter { it.due <= now }.sumOf { it.span },
+        asks = questions.due(now).size,
+        chapters = Places.waiting(questions.places().values, now).size,
+    )
+
+    /** When the next thing falls due that is not due yet. Null when nothing is on its way. */
+    fun nextDue(questions: Questions, now: Long = System.currentTimeMillis()): Long? = listOfNotNull(
+        questions.nextDue(now),
+        questions.hearts().map { it.due }.filter { it > now }.minOrNull(),
+        questions.places().values.map { it.due }.filter { it > now }.minOrNull(),
+    ).minOrNull()
+
+    private fun chapter(bible: Bible, place: Place): Item.Chapter? {
+        val book = bible.books.getOrNull(place.book - 1) ?: return null
+        val headings = Places.outline(bible.headings(place.book, place.number)).takeIf { it.isNotEmpty() }
+            ?: return null
+        return Item.Chapter(place, "${book.name} ${place.number}", headings)
+    }
 
     private fun verse(bible: Bible, h: Heart): Item.Verse? {
         val chapter = runCatching { bible.chapter(h.verse.book, h.verse.chapter) }.getOrNull() ?: return null
@@ -148,15 +179,21 @@ object GoOver {
         }
     }
 
-    /** What to say of [due] verses and questions waiting. Null when nothing is. */
-    fun count(verses: Int, asks: Int): String? {
+    /** What to say of the verses, questions and chapters waiting. Null when nothing is. */
+    fun count(verses: Int, asks: Int, chapters: Int = 0): String? {
         fun n(count: Int, one: String, many: String) =
             if (count == 1) "one $one" else "$count $many"
+        val parts = listOfNotNull(
+            n(verses, "verse", "verses").takeIf { verses > 0 }?.let { "$it to say" },
+            n(asks, "question", "questions").takeIf { asks > 0 },
+            n(chapters, "chapter", "chapters").takeIf { chapters > 0 },
+        )
         return when {
-            verses == 0 && asks == 0 -> null
-            asks == 0 -> n(verses, "verse", "verses") + " to say"
-            verses == 0 -> n(asks, "question", "questions") + " from what you have read"
-            else -> n(verses, "verse", "verses") + " to say and " + n(asks, "question", "questions")
+            parts.isEmpty() -> null
+            parts.size > 1 -> parts.dropLast(1).joinToString(", ") + " and " + parts.last()
+            asks > 0 -> parts[0] + " from what you have read"
+            chapters > 0 -> parts[0] + " to call to mind"
+            else -> parts[0]
         }?.replaceFirstChar { it.uppercase() }
     }
 }
@@ -185,19 +222,15 @@ fun GoOverScreen(
     var at by remember { mutableIntStateOf(0) }
     var chosen by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
     var knew by remember { mutableStateOf<Map<Int, Boolean>>(emptyMap()) }
+    var lifted by remember { mutableStateOf<Map<Int, Set<Int>>>(emptyMap()) }
     var back by remember { mutableStateOf("tomorrow") }
     var next by remember { mutableStateOf<Long?>(null) }
     var verses by remember { mutableStateOf<List<GoOver.Item.Verse>?>(null) }
 
     LaunchedEffect(turn, only) {
-        at = 0; chosen = emptyMap(); knew = emptyMap()
+        at = 0; chosen = emptyMap(); knew = emptyMap(); lifted = emptyMap()
         round = GoOver.load(bible, questions, only)
-        next = withContext(Dispatchers.IO) {
-            val now = System.currentTimeMillis()
-            listOfNotNull(
-                questions.nextDue(now), questions.hearts().map { it.due }.filter { it > now }.minOrNull(),
-            ).minOrNull()
-        }
+        next = withContext(Dispatchers.IO) { GoOver.nextDue(questions) }
     }
     LaunchedEffect(page, turn) {
         if (page != TURN) verses = GoOver.verses(bible, questions)
@@ -272,7 +305,7 @@ fun GoOverScreen(
                 title = "Nothing to go over",
                 body = "A question you miss while reading comes back here a few minutes later. " +
                     "One you knew comes back after a week, and then less and less often. " +
-                    "So does any verse you are learning by heart." +
+                    "So do the chapters you have read, and any verse you are learning by heart." +
                     (next?.let { " The next is due ${GoOver.until(it)}." } ?: ""),
                 action = "Back to reading", onAction = onClose,
             )
@@ -346,6 +379,31 @@ fun GoOverScreen(
                                 }
                             },
                         )
+                        is GoOver.Item.Chapter -> RecallPanel(
+                            label = "From memory",
+                            question = "What is this chapter about?",
+                            headings = item.headings,
+                            lifted = lifted[i] ?: emptySet(),
+                            outcome = knew[i]?.let { if (it) Quiz.RIGHT else Quiz.WRONG },
+                            after = if (knew[i] == true) "It comes back $back."
+                                    else "It will come back in a few minutes.",
+                            onLift = { line ->
+                                lifted = lifted + (i to (
+                                    if (line == null) item.headings.indices.toSet()
+                                    else (lifted[i] ?: emptySet()) + line
+                                ))
+                            },
+                            onSaid = { outcome ->
+                                if (!settled) {
+                                    val now = System.currentTimeMillis()
+                                    questions.recalled(item.of.chapter, outcome, now)
+                                    back = GoOver.until(
+                                        Places.dueAt(item.of.readAt, item.of.history + Past(outcome, now)), now,
+                                    )
+                                    knew = knew + (i to (outcome == Quiz.RIGHT))
+                                }
+                            },
+                        )
                     }
                     if (settled) Row(
                         Modifier.fillMaxWidth().padding(start = 2.dp, bottom = 28.dp),
@@ -356,7 +414,12 @@ fun GoOverScreen(
                             "Read ${item.place.substringBeforeLast(':')}", maxLines = 1, fontFamily = UiFont, fontSize = 13.sp,
                             fontWeight = FontWeight.Medium, color = p.inkSoft,
                             modifier = Modifier.clickable {
-                                onRead(when (item) { is GoOver.Item.Ask -> item.at; is GoOver.Item.Verse -> item.heart.verse })
+                                onRead(when (item) {
+                                    is GoOver.Item.Ask -> item.at
+                                    is GoOver.Item.Verse -> item.heart.verse
+                                    // The head of the chapter, not its first verse.
+                                    is GoOver.Item.Chapter -> item.of.chapter * 1_000
+                                })
                             }.padding(vertical = 8.dp),
                         )
                         Go(
@@ -543,14 +606,19 @@ private fun HeartListen(verses: List<GoOver.Item.Verse>?, narrator: Narrator) {
     }
 }
 
-/** The one thing to press. */
+/** The one thing to press. [quiet] is for a first step on the reading page: an outline, not a block. */
 @Composable
-internal fun Go(label: String, onClick: () -> Unit) {
+internal fun Go(label: String, quiet: Boolean = false, onClick: () -> Unit) {
     val p = LocalPalette.current
-    Surface(onClick = onClick, shape = RoundedCornerShape(9.dp), color = p.gold) {
+    Surface(
+        onClick = onClick, shape = RoundedCornerShape(9.dp),
+        color = if (quiet) Color.Transparent else p.gold,
+        border = if (quiet) BorderStroke(1.dp, p.gold.copy(alpha = 0.7f)) else null,
+    ) {
         Text(
             label, fontFamily = UiFont, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-            color = p.paper, modifier = Modifier.padding(horizontal = 26.dp, vertical = 11.dp),
+            color = if (quiet) p.gold else p.paper,
+            modifier = Modifier.padding(horizontal = 26.dp, vertical = 11.dp),
         )
     }
 }
@@ -572,7 +640,7 @@ private fun Stillness(title: String, body: String, action: String?, onAction: ()
         )
         if (action != null) {
             Spacer(Modifier.height(26.dp))
-            Go(action, onAction)
+            Go(action, onClick = onAction)
         }
         Spacer(Modifier.weight(1.2f))
     }

@@ -164,6 +164,22 @@ class Bible private constructor(private val db: SQLiteDatabase) {
         }
     }
 
+    /** The section headings of one chapter, in order, as they are written. */
+    fun headings(book: Int, chapter: Int): List<String> = db.rawQuery(
+        "SELECT heading FROM verses WHERE book=? AND chapter=? AND heading IS NOT NULL ORDER BY verse",
+        arrayOf(book.toString(), chapter.toString()),
+    ).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
+
+    /** The section headings of every chapter of [book], by chapter. */
+    fun headings(book: Int): Map<Int, List<String>> = db.rawQuery(
+        "SELECT chapter, heading FROM verses WHERE book=? AND heading IS NOT NULL ORDER BY chapter, verse",
+        arrayOf(book.toString()),
+    ).use { c ->
+        val out = LinkedHashMap<Int, MutableList<String>>()
+        while (c.moveToNext()) out.getOrPut(c.getInt(0)) { mutableListOf() }.add(c.getString(1))
+        out
+    }
+
     /** The study layer for one verse: tap a word, get this. */
     fun words(verse: VerseId): List<Word> {
         if (!hasStudy) return emptyList()

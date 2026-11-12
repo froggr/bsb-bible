@@ -465,7 +465,7 @@ fun StudyLayersSheet(
             // First, because it is the one layer that asks something back, and the one that
             // changes how a chapter is read aloud: the voice stops and waits.
             LayerRow(
-                "Questions", "One after each section. The voice asks, and waits for you",
+                "Questions", "After each section and chapter. The voice waits for you",
                 layers.questions,
             ) { onChange(layers.copy(questions = it)) }
             LayerRow(

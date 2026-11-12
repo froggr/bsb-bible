@@ -140,15 +140,18 @@ object ByHeart {
     fun room(phrase: String): Long =
         900L + phrase.split(' ').sumOf { 330L + 45L * it.count(Char::isLetter).coerceAtMost(9) }
 
-    /** "First John 4, verse 19." The figure at the front of a book's name, said as a person says it. */
+    /** A book's name as a person says it: the figure at the front becomes a word. */
+    fun named(book: String): String = when {
+        book.startsWith("1 ") -> "First " + book.drop(2)
+        book.startsWith("2 ") -> "Second " + book.drop(2)
+        book.startsWith("3 ") -> "Third " + book.drop(2)
+        book == "Psalms" -> "Psalm"
+        else -> book
+    }
+
+    /** "First John 4, verse 19." */
     fun spoken(book: String, verse: VerseId, last: VerseId = verse): String {
-        val name = when {
-            book.startsWith("1 ") -> "First " + book.drop(2)
-            book.startsWith("2 ") -> "Second " + book.drop(2)
-            book.startsWith("3 ") -> "Third " + book.drop(2)
-            book == "Psalms" -> "Psalm"
-            else -> book
-        }
+        val name = named(book)
         return if (last > verse) "$name ${verse.chapter}, verses ${verse.verse} to ${last.verse}."
         else "$name ${verse.chapter}, verse ${verse.verse}."
     }
