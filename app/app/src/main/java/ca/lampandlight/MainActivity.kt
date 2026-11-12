@@ -195,13 +195,17 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs, questi
                 epubOf(cold) == null) "book" else "read"
         )
     }
-    // How many questions are due to be gone over, counted afresh whenever the menu opens.
-    var due by remember { mutableStateOf<Int?>(null) }
+    // How many verses and questions are due to be gone over, counted afresh whenever the
+    // menu opens.
+    var due by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     LaunchedEffect(screen) {
         if (screen == "menu" && questions != null) {
-            due = withContext(Dispatchers.IO) { questions.due().size }
+            due = withContext(Dispatchers.IO) { GoOver.waiting(questions) }
         }
     }
+    // A verse just taken up to learn, when Go over is to open on it.
+    var saying by remember { mutableStateOf<VerseId?>(null) }
+    LaunchedEffect(screen) { if (screen != "goover") saying = null }
     // The verse whose action sheet is open, with its row index so "read from here" works.
     var acting by remember { mutableStateOf<Pair<VerseId, Int>?>(null) }
     // The last bookmark tap, kept just long enough to offer it back.
@@ -378,13 +382,14 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs, questi
     // must not be let go for that moment: Android will not start one again from behind a
     // locked screen, and trying to is what ended the reading at the first chapter end.
     val voiced = narrator.speaking || narrator.carrying
-    LaunchedEffect(voiced, bed.playing, state.book, state.chapter, heard, heard?.index) {
+    LaunchedEffect(voiced, narrator.alone, bed.playing, state.book, state.chapter, heard, heard?.index) {
         if (voiced || bed.playing) {
             ReadingService.hold = { narrator.stop(); bed.pause() }
             ReadingService.start(
                 ctx,
                 // Music on its own is not "reading Psalm 23"; say what is actually sounding.
                 if (!voiced) "Music"
+                else if (narrator.alone) "By heart"
                 else if (heard != null) heard.title
                 else bible.reference(verseId(state.book, state.chapter, 1)).substringBeforeLast(":"),
                 buildString {
@@ -441,7 +446,8 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs, questi
             onSearch = { screen = "search" },
             onMenu = { screen = "menu" },
             // The voice belongs to whichever page is in front.
-            voiced = screen != "book",
+            // A verse being said over in Go over is not the page being read either.
+            voiced = screen != "book" && !narrator.alone,
             onBooks = { narrator.reset(); screen = if (session != null) "book" else "books" },
             crumb = session?.takeIf { crumbAt >= 0 && state.depth == crumbAt }?.title,
             onCrumb = {
@@ -573,6 +579,8 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs, questi
             screen == "book" -> shutBook()
             screen == "books" -> screen = "read"
             selection.isNotEmpty() -> selection = emptySet()
+            // A verse gone to from the page goes back to the page.
+            screen == "goover" && saying != null -> screen = "read"
             screen == "library" || screen == "settings" || screen == "goover" -> screen = "menu"
             screen != "read" -> screen = "read"
             // A passage a book opened: back is back to the book.
@@ -637,6 +645,8 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs, questi
             GoOverScreen(
                 bible = bible,
                 questions = q,
+                narrator = narrator,
+                start = saying,
                 onRead = { v ->
                     screen = "read"; narrator.reset(); state.go(v.book, v.chapter, at = v.verse)
                 },
@@ -679,6 +689,15 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs, questi
     }
 
     acting?.let { (verse, index) ->
+        // What is being learned that this verse is part of, and what it could be joined to:
+        // something that stops at the verse before. Read again after every change.
+        var heartTurn by remember(verse) { mutableIntStateOf(0) }
+        val heart = remember(verse, heartTurn) { questions?.heartOf(verse) }
+        val before = remember(verse, heartTurn) {
+            if (heart != null || verse.verse <= 1) null
+            else questions?.heartOf(verse - 1)?.takeIf { it.last == verse - 1 && it.span < ByHeart.SPAN }
+        }
+        fun named(h: Heart) = bible.reference(h.verse) + if (h.last > h.verse) "\u2013${h.last.verse}" else ""
         VerseSheet(
             reference = bible.reference(verse),
             verseText = state.verses.firstOrNull { it.id == verse }?.text.orEmpty(),
@@ -701,6 +720,16 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, prefs: Prefs, questi
                 acting = null
             },
             onSelectRange = { acting = null; anchor = verse; selection = setOf(verse) },
+            // Null where the phone has no place to keep it, and then the sheet does not offer it.
+            learning = questions?.let { heart != null },
+            learningAs = heart?.takeIf { it.span > 1 }?.let { named(it) },
+            joinTo = before?.let { named(it) },
+            onLearn = {
+                if (heart != null) questions?.unlearn(heart.verse) else questions?.learn(verse)
+                heartTurn++
+            },
+            onJoin = { before?.let { questions?.stretch(it.verse, verse) }; heartTurn++ },
+            onStart = { acting = null; saying = heart?.verse ?: verse; screen = "goover" },
             onDismiss = { acting = null },
         )
     }

@@ -238,6 +238,9 @@ leaves the voice waiting. That is an inference from the code, not a measurement,
 silence at the chapter change itself is not in the tally at all (`idle` starts at -1). The two
 "Reading aloud" lines at the foot of Settings are the measurement: ask for them.
 
+**Joe has said the pause between chapters is fine** (2026-11-11: "Pauses between chapters are
+fine tho"). Do not build the make-ahead for the next chapter unless he asks again.
+
 **Never stop and restart the reading service across a chapter.** From the background,
 `startForegroundService()` throws `ForegroundServiceStartNotAllowedException` on Android 12 and
 later unless the service is already up. 0.46 let `speaking` go false for a moment at every
@@ -284,6 +287,40 @@ not be counted as one in `Pulse`.
 one row per answer. `Quiz.dueAt` turns a question's rows into the time it is next due: ten
 minutes after a miss, then 1, 3, 7, 21, 60, 180 days as it is got right; a question known the
 first time starts at 7 days. Only questions already met while reading ever come due.
+
+## By heart
+
+**It works in phrases because the voice reports no word timing.** The only thing known exactly
+is the clause handed to the model, so a verse is cut into phrases (`ByHeart.phrases`) and each
+is its own `Narrator.Line`. Do not try to light or wait on single words.
+
+**A `Line` with `silence` is the listener's turn,** sent as empty audio and waited out with
+`narrator.hushed` true. `speak(lines, alone = true)` is a reading apart from the page: it
+leaves `resumeAt` alone and does not carry into the next chapter. The line verse indexes are
+`ByHeart.base(item) + phrase`, far above any real verse, so the reader ignores them.
+
+**A line that is only a preamble has an empty clause range.** The spoken reference ("Psalm 23,
+verse 1.") is a line with no words; `sayOne` took `subList(1, 1)` of an empty list and the
+voice died at the second level, where the reference is a line by itself. Guard any new use of
+`clause.range`.
+
+**Listening is not logged, only "I had it" and "Not yet".** The hands-free pass cannot know
+whether anything was said, so it moves no verse along. Nothing uses the microphone.
+
+**Making a passage longer starts it again; making it shorter does not.** `heart.since` is the
+time from which `said` rows count. `Questions.stretch` moves it only when the passage grows,
+because a longer passage is a different thing to say and a shorter one has already been said.
+
+**The phrase breaks were tuned by eye, and the lists are short on purpose.** "for" is a place
+word, not a joining word ("what we hope / for and the certainty"); the helping verbs leave out
+is/are/was/were/do/does/did ("the LORD your God is / with you"); a helping verb after a
+subject pronoun breaks before the pronoun ("by grace / you have been saved", not "you / have
+been"). Print the phrases of thirty verses you know before and after
+any change to `JOINS`, `HELPS`, `PLACES` or `LONG`.
+
+**The verse panel scrolls within itself.** Six verses in the largest type are taller than the
+screen, and with the page scrolling instead the cue and the buttons left it. The panel is
+capped at the screen less 350 dp and keeps the sounding line in view with a margin.
 
 ## Data
 

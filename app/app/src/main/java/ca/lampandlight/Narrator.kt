@@ -62,6 +62,19 @@ class Narrator(private val ctx: Context) {
      */
     var carrying by mutableStateOf(false); private set
     fun settled() { carrying = false }
+
+    /**
+     * True while the voice is leaving room for the listener to speak: a [Line.silence] is
+     * running. [verseIndex] says against what. Learning a verse by heart is made of these.
+     */
+    var hushed by mutableStateOf(false); private set
+
+    /**
+     * True while what is being read is not the page in front: a verse being learned, read
+     * by itself. Such a reading does not run on into a next chapter and leaves alone the
+     * place the page's own reading stopped at.
+     */
+    var alone by mutableStateOf(false); private set
     var verseIndex by mutableIntStateOf(-1); private set
     var wordIndex by mutableIntStateOf(-1); private set
 
@@ -250,6 +263,12 @@ class Narrator(private val ctx: Context) {
          * leaves it unsaid if the listener has answered. See [asking].
          */
         val answerTo: String? = null,
+        /**
+         * A line of nothing: the voice says no words and leaves this long, in milliseconds,
+         * for the listener to say them. [verse] still says what the silence is against, so
+         * the page can show whose turn it is. See [hushed].
+         */
+        val silence: Long = 0L,
     )
 
     fun modelReady(): Boolean = File(ctx.filesDir, MODEL_DIR).let { d ->
@@ -352,7 +371,7 @@ class Narrator(private val ctx: Context) {
         // Remember the verse being read, so the button offers to carry on from there.
         // The LINE, not the verse: with study material interleaved the two are different
         // numbers, and speak() starts from a line.
-        if (speaking && lineIndex >= 0) resumeAt = lineIndex
+        if (speaking && lineIndex >= 0 && !alone) resumeAt = lineIndex
         job?.cancel(); job = null
         // The maker too, and now: it is told again when the reading has wound down, but
         // that is a moment later and it would start another sentence in between.
@@ -362,17 +381,21 @@ class Narrator(private val ctx: Context) {
         live?.let { t -> runCatching { t.pause(); t.flush() } }
         speaking = false; preparing = false; carrying = false
         verseIndex = -1; wordIndex = -1; wordSpan = null
-        asking = null; posed = null
+        asking = null; posed = null; hushed = false
     }
 
-    /** Read [lines] in order, from [startAt]. */
-    fun speak(lines: List<Line>, from: Int = 0) {
+    /**
+     * Read [lines] in order, from [startAt]. [alone] for a reading that is not the page's:
+     * see the property of that name.
+     */
+    fun speak(lines: List<Line>, from: Int = 0, alone: Boolean = false) {
         stop()
+        this.alone = alone
         if (lines.isEmpty()) return
         // Starting on an answer would be an answer to nothing: begin at its question.
         val startAt = if (lines.getOrNull(from)?.answerTo != null &&
             lines.getOrNull(from - 1)?.question == lines[from].answerTo) from - 1 else from
-        resumeAt = startAt
+        if (!alone) resumeAt = startAt
         error = null
         reading = lines
         speaking = true
@@ -396,6 +419,8 @@ class Narrator(private val ctx: Context) {
                 val script = buildList {
                     for (i in startAt until lines.size) {
                         val line = lines[i]
+                        // Room left for the listener: one step, with nothing to make.
+                        if (line.silence > 0) { add(i to Clause(IntRange.EMPTY, "", 0)); continue }
                         // "Matthew Henry writes." before the commentary, so the reader knows
                         // whose voice this is without looking at the screen. It is a clause
                         // of its own, over no words: nothing on the page lights for it.
@@ -417,6 +442,7 @@ class Narrator(private val ctx: Context) {
                         for (step in script) {
                             while (isActive && ahead.get() > AHEAD) kotlinx.coroutines.delay(100)
                             if (!isActive) break
+                            if (lines[step.first].silence > 0) { feed.send(step to FloatArray(0)); continue }
                             tune()
                             val pcm = render(model, step.second) { isActive } ?: break
                             ahead.addAndGet(pcm.size.toLong())
@@ -447,6 +473,16 @@ class Narrator(private val ctx: Context) {
                     }
                     val (i, clause) = step
                     val line = lines[i]
+                    // The listener's turn. Silence the script asked for, so not a stall.
+                    if (line.silence > 0) {
+                        lineIndex = i
+                        verseIndex = line.verse
+                        wordSpan = null; wordIndex = -1
+                        hushed = true
+                        try { kotlinx.coroutines.delay(line.silence) } finally { hushed = false }
+                        idle = -1L
+                        continue
+                    }
                     // A question the listener settled on the page before the voice reached
                     // it is not asked, and its answer is not read.
                     if (line.question != null && replied?.invoke(line.question) != null) {
@@ -490,16 +526,16 @@ class Narrator(private val ctx: Context) {
                     live = null
                     lineIndex = -1
                     // Before speaking goes false, so nothing sees a moment with neither.
-                    if (finished && onChapterEnd != null) carrying = true
+                    if (finished && !alone && onChapterEnd != null) carrying = true
                     speaking = false; preparing = false
                     verseIndex = -1; wordIndex = -1; wordSpan = null
-                    posed = null
+                    posed = null; hushed = false
                 }
             }
             if (finished && turn == mine) {
                 // Read to the end, so the next press starts over — and whoever is listening
                 // may want the next chapter.
-                resumeAt = 0
+                if (!alone) resumeAt = 0
                 Handler(Looper.getMainLooper()).post {
                     val then = onChapterEnd
                     if (then != null && carrying) then() else carrying = false
@@ -791,7 +827,10 @@ class Narrator(private val ctx: Context) {
         // "through" differ by a factor of seven in letters but nothing like that in time.
         // Syllables plus a floor per word track speech far better, and the floor is what
         // keeps a run of short words ("Even though I walk through the") from being skipped.
-        val spanWords = line.words.subList(clause.range.first, clause.range.last + 1)
+        // A clause of nothing but what is said before the words (a reference, a heading) has
+        // an empty range, and on a line with no words of its own that range is out of bounds.
+        val spanWords = if (clause.range.isEmpty()) emptyList()
+        else line.words.subList(clause.range.first, clause.range.last + 1)
         val weights = spanWords.map { syllables(it) + WORD_FLOOR }
         val total = weights.sum().coerceAtLeast(1f)
         val bounds = FloatArray(weights.size)          // cumulative fraction of the SPOKEN part
@@ -806,7 +845,7 @@ class Narrator(private val ctx: Context) {
         val watcher = scope.launch {
             while (isActive) {
                 val abs = (track.playbackHeadPosition.toLong() and 0xFFFFFFFFL) - base
-                if (abs >= lead) {
+                if (abs >= lead && weights.isNotEmpty()) {
                     val frac = ((abs - lead).toFloat() / spoken).coerceIn(0f, 1f)
                     var idx = bounds.indexOfFirst { frac <= it }
                     if (idx < 0) idx = weights.lastIndex

@@ -590,8 +590,8 @@ fun LibraryScreen(bible: Bible, onOpen: (VerseId) -> Unit, onClose: () -> Unit) 
 @Composable
 fun MenuScreen(
     onBooks: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onClose: () -> Unit,
-    /** How many questions are due to be gone over; null where there are no questions. */
-    due: Int? = null, onGoOver: () -> Unit = {},
+    /** How many verses and questions are due to be gone over; null where there are none to have. */
+    due: Pair<Int, Int>? = null, onGoOver: () -> Unit = {},
 ) {
     val p = LocalPalette.current
     Column(
@@ -611,11 +611,8 @@ fun MenuScreen(
         MenuItem("Books", "Your own epubs, read and listened to here", onBooks)
         if (due != null) MenuItem(
             "Go over",
-            when (due) {
-                0 -> "Questions you met while reading come back here"
-                1 -> "One question from what you have read"
-                else -> "$due questions from what you have read"
-            },
+            GoOver.count(due.first, due.second)
+                ?: "Verses you are learning and questions you have met come back here",
             onGoOver,
         )
         MenuItem("Marks and notes", "Everything you have coloured or written on", onLibrary)

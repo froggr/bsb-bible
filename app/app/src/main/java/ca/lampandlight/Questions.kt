@@ -153,11 +153,11 @@ object Quiz {
      * When a question is next due, from everything that has happened to it, oldest first.
      * Null for one never put: going over is of what has been read, never of what has not.
      */
-    fun dueAt(history: List<Past>): Long? {
+    fun dueAt(history: List<Past>, headStart: Int = HEAD_START): Long? {
         val last = history.lastOrNull() ?: return null
         val running = history.takeLastWhile { it.outcome == RIGHT }.size
         val missed = history.any { it.outcome != RIGHT }
-        val step = if (missed) running else running + HEAD_START
+        val step = if (missed) running else running + headStart
         return last.at + RESTS[step.coerceAtMost(RESTS.lastIndex)]
     }
 
@@ -268,6 +268,73 @@ class Questions private constructor(
     /** When [key] was last put, or 0. */
     fun lastAt(key: String): Long = past(listOf(key))[key]?.at ?: 0L
 
+    // ------------------------------------------------------------- by heart
+
+    /** Start learning [verse] by heart. What was said of it before, if anything, still counts. */
+    fun learn(verse: VerseId, at: Long = System.currentTimeMillis()) {
+        runCatching {
+            mine?.execSQL("INSERT OR IGNORE INTO heart(verse, added) VALUES (?,?)", arrayOf<Any>(verse, at))
+        }
+    }
+
+    /** Stop. The record of saying it is kept, so taking it up again is not starting again. */
+    fun unlearn(verse: VerseId) {
+        runCatching { mine?.execSQL("DELETE FROM heart WHERE verse = ?", arrayOf<Any>(verse)) }
+    }
+
+    /**
+     * Learn [verse] through to [upto], or with null only itself again.
+     *
+     * Longer, it is a different thing to say, so it starts again as new: what was said of the
+     * shorter one is kept in the log and no longer counted. Shorter, it is something already
+     * said within the longer one, and it keeps its place.
+     */
+    fun stretch(verse: VerseId, upto: VerseId?, at: Long = System.currentTimeMillis()) {
+        val last = upto?.takeIf { it > verse }
+        val was = heartOf(verse)?.takeIf { it.verse == verse } ?: return
+        runCatching {
+            if ((last ?: verse) > was.last) mine?.execSQL(
+                "UPDATE heart SET upto = ?, since = ?, added = ? WHERE verse = ?",
+                arrayOf<Any?>(last, at, at, verse),
+            ) else mine?.execSQL("UPDATE heart SET upto = ? WHERE verse = ?", arrayOf<Any?>(last, verse))
+        }
+    }
+
+    /** What is being learned that has [verse] in it, by its first verse. */
+    fun heartOf(verse: VerseId): Heart? = hearts().firstOrNull { verse in it.verse..it.last }
+
+    /** Every verse being learned, in the order they were taken up. */
+    fun hearts(): List<Heart> {
+        val db = mine ?: return emptyList()
+        return runCatching {
+            val said = HashMap<Int, MutableList<Past>>()
+            db.rawQuery(
+                "SELECT s.verse, s.outcome, s.at FROM said s JOIN heart h ON h.verse = s.verse " +
+                    "WHERE s.at >= h.since ORDER BY s.at", null,
+            ).use { c ->
+                while (c.moveToNext())
+                    said.getOrPut(c.getInt(0)) { mutableListOf() }.add(Past(c.getInt(1), c.getLong(2)))
+            }
+            db.rawQuery("SELECT verse, added, upto FROM heart ORDER BY added, verse", null).use { c ->
+                buildList {
+                    while (c.moveToNext()) add(
+                        Heart(
+                            c.getInt(0), c.getLong(1), said[c.getInt(0)].orEmpty(),
+                            if (c.isNull(2)) null else c.getInt(2),
+                        )
+                    )
+                }
+            }
+        }.getOrElse { emptyList() }
+    }
+
+    /** [verse] was said from memory ([Quiz.RIGHT]) or was not ([Quiz.WRONG]). */
+    fun said(verse: VerseId, outcome: Int, at: Long = System.currentTimeMillis()) {
+        runCatching {
+            mine?.execSQL("INSERT INTO said(verse, at, outcome) VALUES (?,?,?)", arrayOf<Any>(verse, at, outcome))
+        }
+    }
+
     fun record(key: String, outcome: Int, at: Long = System.currentTimeMillis()) {
         runCatching {
             mine?.execSQL("INSERT INTO asked(key, at, outcome) VALUES (?,?,?)", arrayOf<Any>(key, at, outcome))
@@ -299,6 +366,12 @@ class Questions private constructor(
                 SQLiteDatabase.openOrCreateDatabase(File(ctx.filesDir, MINE), null).also {
                     it.execSQL("CREATE TABLE IF NOT EXISTS asked(key TEXT NOT NULL, at INTEGER NOT NULL, outcome INTEGER NOT NULL)")
                     it.execSQL("CREATE INDEX IF NOT EXISTS asked_key ON asked(key, at)")
+                    it.execSQL(
+                        "CREATE TABLE IF NOT EXISTS heart(verse INTEGER PRIMARY KEY, added INTEGER NOT NULL, " +
+                            "upto INTEGER, since INTEGER NOT NULL DEFAULT 0)"
+                    )
+                    it.execSQL("CREATE TABLE IF NOT EXISTS said(verse INTEGER NOT NULL, at INTEGER NOT NULL, outcome INTEGER NOT NULL)")
+                    it.execSQL("CREATE INDEX IF NOT EXISTS said_verse ON said(verse, at)")
                 }
             }.getOrElse { Log.w(TAG, "answers not kept: ${it.message}"); null }
             return Questions(asked, mine)

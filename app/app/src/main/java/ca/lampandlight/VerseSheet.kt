@@ -38,6 +38,16 @@ fun VerseSheet(
     onReadFrom: () -> Unit,
     onCopy: () -> Unit,
     onSelectRange: () -> Unit,
+    /** Whether this verse is being learned by heart; null where that cannot be kept. */
+    learning: Boolean? = null,
+    /** "John 3:16–17" where this verse is being learned as part of more than itself. */
+    learningAs: String? = null,
+    /** What stops at the verse before this one and could take this one in. */
+    joinTo: String? = null,
+    onLearn: () -> Unit = {},
+    onJoin: () -> Unit = {},
+    /** Go and say it now. */
+    onStart: () -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     val p = LocalPalette.current
@@ -112,6 +122,40 @@ fun VerseSheet(
                     color = p.inkSoft, maxLines = 3,
                     modifier = Modifier.padding(bottom = 6.dp),
                 )
+            }
+            if (learning == false) Action("Learn by heart", onLearn)
+            if (learning == false && joinTo != null) Action("Learn together with $joinTo", onJoin)
+            if (learning == true) {
+                // The sheet stays open on this one. Where the verse has gone is the answer
+                // to the tap, and it is said here because nothing on the page will say it.
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (learningAs != null) "Learning $learningAs" else "Learning by heart",
+                        fontFamily = UiFont, fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium, color = p.gold,
+                        modifier = Modifier.padding(vertical = 15.dp),
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "Start now", fontFamily = UiFont, fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium, color = p.gold,
+                        modifier = Modifier.clickable { onStart() }.padding(start = 16.dp, top = 12.dp, bottom = 12.dp),
+                    )
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "It is waiting in Go over, under Marks & settings.",
+                        fontFamily = UiFont, fontSize = 12.sp, lineHeight = 17.sp, color = p.inkSoft,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "Stop", fontFamily = UiFont, fontSize = 12.sp, color = p.inkSoft,
+                        modifier = Modifier.clickable { onLearn() }.padding(start = 16.dp, top = 6.dp, bottom = 6.dp),
+                    )
+                }
             }
             Action("Mark through to…", onSelectRange)
             Action("Read from here", onReadFrom)

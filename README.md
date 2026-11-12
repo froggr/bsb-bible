@@ -44,6 +44,12 @@ Needs Android 10 or newer, and about 120 MB free once the voice is downloaded.
   minutes later under *Go over*, and then after a day, three days, a week, and so on. The
   questions were written by people, not generated: they are unfoldingWord's Translation
   Questions.
+- **Learn a verse by heart, by ear.** Hold a verse and choose *Learn by heart*; add the verses
+  after it, up to six, to make it a passage. The voice says it a phrase at a time and leaves
+  room for you to say each one back. The next day only the first letter of every word shows,
+  then nothing but the blanks, and it comes back after longer and longer as you keep it. You
+  say whether you had it; nothing listens to you. *Listen, and say them with the voice* goes
+  through everything you are learning with the screen off, for the car or the dishes.
 - **Your own books, on the same page.** Bring in the epubs you already own, a folder at a
   time, and they are set in the same type and read in the same voice as the Bible. Every
   Scripture reference in them opens its passage in a sheet over the page, so the place in
@@ -269,6 +275,7 @@ which question a section asks next (`Quiz.choose`) and when one is due to be gon
 | Note sheet | writing on a verse, with the verse in front of you |
 | Search | full text, debounced, matches emboldened |
 | Marks and notes | everything coloured or written on |
+| Go over | the questions that are due and the verses being learned, eight to a round; the list of verses; the hands-free listen |
 | Books | the shelf: epubs brought in from the phone, with covers, the place kept, sort and filter |
 | Book | one book open: chapter text in the app's own type, narration, citations that open their passage |
 | Settings | text size, theme, voice, study downloads, music, manual update check |
@@ -281,6 +288,18 @@ A note or a commentary paragraph covering several verses is one `Row`, under the
 of its span, and every row from the span's first verse down to it carries a `Margin` — the
 bracket lanes `rebuild()` works out row by row, because only the layout knows what sits
 between a span's first verse and its last (a heading, a footnote, another commentator).
+
+**By heart** lives in `ByHeart.kt` (the rules, plain Kotlin and unit-tested), `Heart.kt` (the
+verse set out a phrase to a line) and `GoOver.kt` (the round, the list, the listen). A verse
+being learned is a row in `learning.db`'s `heart` table and every "I had it" or "Not yet" a
+row in `said`; the level (hear it, first letters, blanks) and the day it comes back are worked
+out from those rows, the same way the questions are. It works in **phrases, not words**,
+because the voice model reports no word timing: the only thing known exactly is the clause
+handed to it, so each phrase is its own `Narrator.Line`, and a line with `silence` set is the
+listener's turn. `ByHeart.phrases` breaks a verse at its punctuation and halves anything over
+ten words before a joining word; it was tuned by eye against 37 well-known verses, so print
+some before changing its word lists. A practice is spoken with `speak(lines, alone = true)`,
+which leaves the page's own place alone and does not roll into the next chapter.
 
 **Music beds** play their run-in once and then loop a region of the file forever
 (`Beds.Item.loopStartMs`/`loopEndMs`, found by PyMusicLooper). The region is decoded to PCM once
