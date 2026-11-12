@@ -45,11 +45,12 @@ Needs Android 10 or newer, and about 120 MB free once the voice is downloaded.
   questions were written by people, not generated: they are unfoldingWord's Translation
   Questions.
 - **Learn a verse by heart, by ear.** Hold a verse and choose *Learn by heart*; add the verses
-  after it, up to six, to make it a passage. The voice says it a phrase at a time and leaves
-  room for you to say each one back. The next day only the first letter of every word shows,
+  after it, up to six, to make it a passage. The voice says it a phrase at a time and waits
+  for you to say each one back: press *Go on* when you have. The next day only the first letter of every word shows,
   then nothing but the blanks, and it comes back after longer and longer as you keep it. You
   say whether you had it; nothing listens to you. *Listen, and say them with the voice* goes
-  through everything you are learning with the screen off, for the car or the dishes.
+  through everything you are learning with the screen off, for the car or the dishes; there
+  it leaves a silence the length of the phrase and goes on by itself.
 - **It asks where things are.** Before you carry on in a book, the page asks what the last
   chapter was about, with its section headings covered. Say them to yourself, look, and say
   whether you had it. With the voice reading, it asks aloud, waits, and then says them. A
@@ -303,7 +304,9 @@ row in `said`; the level (hear it, first letters, blanks) and the day it comes b
 out from those rows, the same way the questions are. It works in **phrases, not words**,
 because the voice model reports no word timing: the only thing known exactly is the clause
 handed to it, so each phrase is its own `Narrator.Line`, and a line with `silence` set is the
-listener's turn. `ByHeart.phrases` breaks a verse at its punctuation and halves anything over
+listener's turn. On a verse's own card those lines also `hold`: the voice waits for
+`narrator.goOn()` however long that takes, and falls back to the timed silence only when the
+app is off screen. `ByHeart.phrases` breaks a verse at its punctuation and halves anything over
 ten words before a joining word; it was tuned by eye against 37 well-known verses, so print
 some before changing its word lists. A practice is spoken with `speak(lines, alone = true)`,
 which leaves the page's own place alone and does not roll into the next chapter.

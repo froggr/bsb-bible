@@ -179,27 +179,36 @@ object ByHeart {
      *   then the verse once more.
      * - [LETTERS]: the reference, then room before each phrase to say it first.
      * - [BLANK]: the reference, room for all of it, then the verse.
+     *
+     * With [tap] the room is not timed: the voice waits to be told to go on, as it can be
+     * on the verse's own card. Without, it leaves [room] and goes on by itself, which is
+     * what hands that are busy need.
      */
-    fun script(item: Int, reference: String, phrases: List<String>, level: Int): List<Narrator.Line> = buildList {
+    fun script(
+        item: Int, reference: String, phrases: List<String>, level: Int, tap: Boolean = false,
+    ): List<Narrator.Line> = buildList {
         val at = base(item)
         fun say(index: Int, text: String, preamble: String? = null) =
             add(Narrator.Line(at + index, text.split(' '), text, preamble = preamble))
+        // The listener's turn: by the clock, or theirs to end where [tap] says they can.
         fun leave(index: Int, ms: Long) =
-            add(Narrator.Line(at + index, emptyList(), "", silence = ms))
+            add(Narrator.Line(at + index, emptyList(), "", silence = ms, hold = tap))
+        // A breath between two things the voice says. Against no phrase: it is nobody's turn.
+        fun breath(ms: Long) = add(Narrator.Line(at + NAME, emptyList(), "", silence = ms))
         // The reference alone, against no phrase, so none is lit while it is said.
         fun name() = add(Narrator.Line(at + NAME, emptyList(), "", aside = true, preamble = reference))
         val whole = phrases.joinToString(" ")
         when (level) {
             NEW -> {
                 say(WHOLE, whole, preamble = reference)
-                leave(WHOLE, 900)
+                breath(1500)
                 phrases.forEachIndexed { i, p -> say(i, p); leave(i, room(p)) }
                 say(WHOLE, whole)
             }
             LETTERS -> {
                 name()
                 phrases.forEachIndexed { i, p -> leave(i, room(p)); say(i, p) }
-                leave(WHOLE, 700)
+                breath(700)
                 say(WHOLE, whole)
             }
             else -> {

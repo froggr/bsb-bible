@@ -295,7 +295,12 @@ is the clause handed to the model, so a verse is cut into phrases (`ByHeart.phra
 is its own `Narrator.Line`. Do not try to light or wait on single words.
 
 **A `Line` with `silence` is the listener's turn,** sent as empty audio and waited out with
-`narrator.hushed` true. `speak(lines, alone = true)` is a reading apart from the page: it
+`narrator.hushed` true. On a verse's card it also has `hold`, and is waited out until
+`narrator.goOn()` with `narrator.held` true: Joe asked for a tap in place of a timed pause
+(0.51). Off screen nobody can tap, so a hold falls back to its `silence`, and the hands-free
+pass builds its script with no holds at all. Keep both: do not make the hands-free pass wait
+for a tap. The short breath between two things the voice says is a silence against
+`ByHeart.NAME`, not a phrase, so the page does not call it a turn. `speak(lines, alone = true)` is a reading apart from the page: it
 leaves `resumeAt` alone and does not carry into the next chapter. The line verse indexes are
 `ByHeart.base(item) + phrase`, far above any real verse, so the reader ignores them.
 

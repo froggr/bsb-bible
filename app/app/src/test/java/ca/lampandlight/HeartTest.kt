@@ -71,9 +71,15 @@ class HeartTest {
         // Room for the phrase, then the phrase, for each; then the whole verse.
         val shape = lines.drop(1).map { (it.verse - at) to (it.silence > 0) }
         assertEquals(
-            listOf(0 to true, 0 to false, 1 to true, 1 to false, ByHeart.WHOLE to true, ByHeart.WHOLE to false),
+            listOf(0 to true, 0 to false, 1 to true, 1 to false, ByHeart.NAME to true, ByHeart.WHOLE to false),
             shape,
         )
+        // Hands-free, every room is timed. On the card the listener's turns are theirs to
+        // end, and the breath before the whole verse is still the voice's own.
+        assertTrue(lines.none { it.hold })
+        val tapped = ByHeart.script(2, "Psalm 23, verse 1.", phrases, ByHeart.LETTERS, tap = true)
+        assertEquals(listOf(0, 1), tapped.filter { it.hold }.map { it.verse - at })
+        assertTrue(tapped.all { !it.hold || it.silence > 0 })
         assertEquals("The LORD is my shepherd; I shall not want.", lines.last().text)
         // New: said first, and the room comes after each phrase.
         val fresh = ByHeart.script(0, "Psalm 23, verse 1.", phrases, ByHeart.NEW)
@@ -81,6 +87,11 @@ class HeartTest {
         assertTrue(fresh.first().silence == 0L && fresh.first().words.isNotEmpty())
         val i = fresh.indexOfFirst { it.text == phrases[0] }
         assertTrue(fresh[i + 1].silence > 0)
+        assertEquals(
+            listOf(0, 1),
+            ByHeart.script(0, "Psalm 23, verse 1.", phrases, ByHeart.NEW, tap = true)
+                .filter { it.hold }.map { it.verse - ByHeart.base(0) },
+        )
         // From the reference alone: one silence long enough for all of it.
         val blank = ByHeart.script(0, "Psalm 23, verse 1.", phrases, ByHeart.BLANK)
         assertEquals(1, blank.count { it.silence > 0 })

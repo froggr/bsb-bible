@@ -229,6 +229,8 @@ private fun Phrase(
  *
  * Nothing listens. The reader says the verse aloud, looks, and says whether they had it,
  * and is believed. The voice is offered and never starts by itself: it may be a quiet room.
+ * Where it leaves the reader a turn it waits to be told to go on, however long that is: a
+ * child sounding a line out is not hurried, and someone who has it is not kept waiting.
  *
  * [slot] is the verse's place in whatever the voice is reading, so it can tell its own
  * phrases from another verse's. [said] is the answer given, or null while it is open.
@@ -252,7 +254,10 @@ fun HeartCard(
 
     val mine = narrator.alone && narrator.speaking
     val at = if (mine) (narrator.verseIndex - ByHeart.base(slot)).takeIf { it in 0 until ByHeart.NAME } ?: -1 else -1
-    val hush = mine && narrator.hushed
+    // A breath between two things the voice says is against no phrase, and nobody's turn.
+    val hush = mine && narrator.hushed && at >= 0
+    // The turn is the reader's to end. Not so with the page put away, where it is timed.
+    val held = hush && narrator.held
     // What the voice says stays said: a phrase it has spoken is uncovered and stays so.
     LaunchedEffect(at, hush) {
         if (hush || at < 0) return@LaunchedEffect
@@ -283,6 +288,8 @@ fun HeartCard(
             when {
                 said == Quiz.RIGHT -> "It comes back $back."
                 said != null -> "It will come back in a few minutes."
+                held && !trying -> "Your turn. Say it back, then go on."
+                held -> "Your turn. Say it, then hear it."
                 hush && !trying -> "Your turn. Say it back."
                 hush -> "Your turn. Say it."
                 mine -> "Listen."
@@ -294,18 +301,28 @@ fun HeartCard(
         )
         if (said == null) {
             Spacer(Modifier.height(20.dp))
-            Row(Modifier.fillMaxWidth().padding(start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            // As tall as its tallest button whatever it holds, so nothing moves as they change.
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 46.dp).padding(start = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 if (narrator.modelReady()) {
                     Listen(playing = mine, preparing = mine && narrator.preparing) {
                         if (mine) narrator.stop()
                         else {
                             seen = emptySet()
-                            narrator.speak(ByHeart.script(slot, item.spoken, item.phrases, level), alone = true)
+                            narrator.speak(
+                                ByHeart.script(slot, item.spoken, item.phrases, level, tap = true), alone = true,
+                            )
                         }
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                if (!trying) Go("Now say it") {
+                // While the voice has the verse there is one thing to press, and it is not
+                // under the thumb that has just pressed "Go on".
+                if (held) Go(if (!trying) "Go on" else "Hear it") { narrator.goOn() }
+                else if (mine) Unit
+                else if (!trying) Go("Now say it") {
                     if (narrator.alone) narrator.stop()
                     seen = emptySet(); trying = true
                 } else {

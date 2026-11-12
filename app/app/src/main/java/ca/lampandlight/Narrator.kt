@@ -70,6 +70,36 @@ class Narrator(private val ctx: Context) {
     var hushed by mutableStateOf(false); private set
 
     /**
+     * True while that room has no end of its own and lasts until [goOn]: a [Line.hold], with
+     * the page in front of someone who can say when they have done.
+     */
+    var held by mutableStateOf(false); private set
+    @Volatile private var moved = false
+
+    /** The listener has said their part: end the room being left for them. */
+    fun goOn() { moved = true }
+
+    /**
+     * Leave room for [line] to be said. By the clock, unless the line holds and the page is
+     * on screen: then for as long as the listener takes. Put away or locked, nobody can say
+     * go on, so the clock does, and a hold already longer than its time ends at once.
+     */
+    private suspend fun leave(line: Line) {
+        moved = false
+        val began = SystemClock.elapsedRealtime()
+        try {
+            while (currentCoroutineContext().isActive && !moved) {
+                val waits = line.hold && Pulse.onScreen
+                if (waits != held) held = waits
+                if (!waits && SystemClock.elapsedRealtime() - began >= line.silence) break
+                kotlinx.coroutines.delay(40)
+            }
+        } finally {
+            held = false
+        }
+    }
+
+    /**
      * True while what is being read is not the page in front: a verse being learned, read
      * by itself. Such a reading does not run on into a next chapter and leaves alone the
      * place the page's own reading stopped at.
@@ -269,6 +299,11 @@ class Narrator(private val ctx: Context) {
          * the page can show whose turn it is. See [hushed].
          */
         val silence: Long = 0L,
+        /**
+         * With [silence]: the room is the listener's to end, by [goOn], while there is a
+         * page in front of them to end it on. [silence] is then how long it lasts off screen.
+         */
+        val hold: Boolean = false,
     )
 
     fun modelReady(): Boolean = File(ctx.filesDir, MODEL_DIR).let { d ->
@@ -381,7 +416,7 @@ class Narrator(private val ctx: Context) {
         live?.let { t -> runCatching { t.pause(); t.flush() } }
         speaking = false; preparing = false; carrying = false
         verseIndex = -1; wordIndex = -1; wordSpan = null
-        asking = null; posed = null; hushed = false
+        asking = null; posed = null; hushed = false; held = false
     }
 
     /**
@@ -479,7 +514,7 @@ class Narrator(private val ctx: Context) {
                         verseIndex = line.verse
                         wordSpan = null; wordIndex = -1
                         hushed = true
-                        try { kotlinx.coroutines.delay(line.silence) } finally { hushed = false }
+                        try { leave(line) } finally { hushed = false }
                         idle = -1L
                         continue
                     }

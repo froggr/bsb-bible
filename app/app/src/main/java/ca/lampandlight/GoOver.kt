@@ -558,6 +558,8 @@ private fun HeartListen(verses: List<GoOver.Item.Verse>?, narrator: Narrator) {
     var begun by remember { mutableStateOf(false) }
     val hush = mine && narrator.hushed
     val at = if (index >= 0) index % 100 else -1
+    // A breath between two things the voice says is against no phrase, and nobody's turn.
+    val turn = hush && at in 0 until ByHeart.NAME
 
     LaunchedEffect(Unit) { narrator.speak(script, alone = true); begun = true }
     LaunchedEffect(index, hush) {
@@ -578,17 +580,17 @@ private fun HeartListen(verses: List<GoOver.Item.Verse>?, narrator: Narrator) {
             )
             VersePanel(
                 phrases = v.phrases, level = v.level, seen = seen,
-                at = at.takeIf { it in 0 until ByHeart.NAME } ?: -1, hush = hush, onTap = null,
+                at = at.takeIf { it in 0 until ByHeart.NAME } ?: -1, hush = turn, onTap = null,
             )
             Spacer(Modifier.height(12.dp))
             Cue(
                 when {
                     !mine && begun && !narrator.preparing -> "That is all of them."
-                    hush && v.level == ByHeart.NEW -> "Your turn. Say it back."
-                    hush -> "Your turn. Say it."
+                    turn && v.level == ByHeart.NEW -> "Your turn. Say it back."
+                    turn -> "Your turn. Say it."
                     else -> "Listen."
                 },
-                yours = hush,
+                yours = turn,
             )
         }
         Row(

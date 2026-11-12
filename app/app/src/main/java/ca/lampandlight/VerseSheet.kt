@@ -73,6 +73,30 @@ fun VerseSheet(
                 maxLines = 3,
             )
 
+            // Writing on the verse comes first and looks like somewhere to write: it is
+            // what a long press is most often for, and as one plain line among eight it
+            // had to be looked for.
+            Spacer(Modifier.height(16.dp))
+            Surface(
+                onClick = onNote,
+                color = p.paper, shape = RoundedCornerShape(9.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, p.rule),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(Modifier.padding(horizontal = 14.dp, vertical = 13.dp)) {
+                    NoteMark(p.inkSoft, 15.dp, Modifier.padding(top = 3.dp))
+                    Spacer(Modifier.width(11.dp))
+                    if (note.isNullOrBlank()) Text(
+                        "Write a note", fontFamily = ReadingFont, fontSize = 15.sp, lineHeight = 22.sp,
+                        color = p.inkSoft,
+                    ) else Text(
+                        note, fontFamily = ReadingFont, fontStyle = FontStyle.Italic, fontSize = 15.sp,
+                        lineHeight = 22.sp, color = p.ink, maxLines = 3,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
             Spacer(Modifier.height(20.dp))
 
             // The colour row doubles as the bookmark control: tapping a colour keeps the
@@ -114,15 +138,6 @@ fun VerseSheet(
             Spacer(Modifier.height(22.dp))
             Box(Modifier.fillMaxWidth().height(1.dp).background(p.rule))
 
-            Action(if (note.isNullOrBlank()) "Write a note" else "Edit note", onNote)
-            if (!note.isNullOrBlank()) {
-                Text(
-                    note,
-                    fontFamily = ReadingFont, fontSize = 14.sp, lineHeight = 22.sp,
-                    color = p.inkSoft, maxLines = 3,
-                    modifier = Modifier.padding(bottom = 6.dp),
-                )
-            }
             if (learning == false) Action("Learn by heart", onLearn)
             if (learning == false && joinTo != null) Action("Learn together with $joinTo", onJoin)
             if (learning == true) {

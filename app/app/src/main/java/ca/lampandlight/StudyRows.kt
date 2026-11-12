@@ -135,17 +135,28 @@ fun NoteRow(text: String, colour: MarkColor, scope: String? = null, onTap: () ->
                     interactionSource = remember { MutableInteractionSource() },
                 ) { onTap() },
         ) {
-            Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 9.dp, bottom = 10.dp)) {
-                Label(if (scope == null) "Your note" else "Your note \u00b7 $scope", p.inkSoft)
-                Spacer(Modifier.height(4.dp))
-                androidx.compose.material3.Text(
-                    text,
-                    fontFamily = ReadingFont,
-                    fontStyle = FontStyle.Italic,
-                    fontSize = (14.5 * LocalTextScale.current).sp,
-                    lineHeight = (23 * LocalTextScale.current).sp,
-                    color = p.ink,
-                )
+            // A pencil where a label was: whose note it is needs no saying to its writer.
+            val scale = LocalTextScale.current
+            Row(Modifier.padding(start = 11.dp, end = 12.dp, top = 9.dp, bottom = 10.dp)) {
+                // Level with the first line of what it marks, and its size: the note's own
+                // words, which grow with the type, or the small label over them, which does not.
+                if (scope == null) NoteMark(p.inkSoft, (13 * scale).dp, Modifier.padding(top = (5.5f * scale).dp))
+                else NoteMark(p.inkSoft, 12.dp)
+                Spacer(Modifier.width(9.dp))
+                Column {
+                    if (scope != null) {
+                        Label(scope, p.inkSoft)
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    androidx.compose.material3.Text(
+                        text,
+                        fontFamily = ReadingFont,
+                        fontStyle = FontStyle.Italic,
+                        fontSize = (14.5 * scale).sp,
+                        lineHeight = (23 * scale).sp,
+                        color = p.ink,
+                    )
+                }
             }
         }
     }
@@ -164,7 +175,9 @@ fun NoteRow(text: String, colour: MarkColor, scope: String? = null, onTap: () ->
 fun FootnoteRow(letter: Int, phrase: String?, text: String) {
     val p = LocalPalette.current
     val scale = LocalTextScale.current
-    val body = remember(phrase, text) {
+    // The ink too: kept across a change of theme, the quoted words stayed the old colour,
+    // dark on the dark page, for as long as the row was on screen.
+    val body = remember(phrase, text, p.ink) {
         buildAnnotatedString {
             if (phrase != null) {
                 withStyle(SpanStyle(color = p.ink, fontWeight = FontWeight.Medium)) { append(phrase) }

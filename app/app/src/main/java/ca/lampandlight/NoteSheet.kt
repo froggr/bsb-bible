@@ -14,7 +14,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
@@ -22,6 +29,32 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+/**
+ * A pencil: the sign for what the reader has written, wherever it is shown or offered. It
+ * stands where a label would, because whose note it is needs no saying to the one who wrote
+ * it. Drawn, not a glyph, so it is the same weight on every phone and takes the ink's colour.
+ */
+@Composable
+fun NoteMark(colour: Color, size: Dp = 13.dp, modifier: Modifier = Modifier) {
+    Canvas(modifier.size(size)) {
+        // On a grid of 24: the barrel from the top right down to the point at the bottom left.
+        val u = this.size.minDimension / 24f
+        val barrel = Path().apply {
+            moveTo(16.5f * u, 3.5f * u)
+            lineTo(20.5f * u, 7.5f * u)
+            lineTo(8f * u, 20f * u)
+            lineTo(3f * u, 21f * u)
+            lineTo(4f * u, 16f * u)
+            close()
+        }
+        val pen = Stroke(width = 1.9f * u, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        drawPath(barrel, colour, style = pen)
+        // Where the wood meets the barrel.
+        drawLine(colour, androidx.compose.ui.geometry.Offset(13.5f * u, 6.5f * u),
+            androidx.compose.ui.geometry.Offset(17.5f * u, 10.5f * u), 1.9f * u, StrokeCap.Round)
+    }
+}
 
 /**
  * Writing on a verse.
