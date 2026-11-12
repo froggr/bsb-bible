@@ -144,7 +144,12 @@ levels: forty verses of Methuselah measured 13 dB apart, quietest clause to loud
 takes the rumble off below 60 Hz, brings each clause toward one level and holds peaks with a
 short look-ahead limiter; `evened +3.4 dB, peaks held -1.2 dB` in the log is one clause. On
 the emulator the gains ran from -2.4 to +6.4 dB over 48 clauses. **Nobody has listened to it
-yet.** Measurements have agreed with me and disagreed with Joe about audio before, every
+yet.** Scripture Radio's voice is `say()` in `~/projects/yue2/tools/radio_dj.py` (there is no
+scripture-radio folder): the same voice at the same temperature, Vyrmathrax at 0.9, which is
+`Voices.warmth`, then `VOICE_FX`: a 90 Hz high-pass, a 4:1 compressor, +3 dB at 3.5 kHz and
+`loudnorm`. `Steady` has no compressor inside a clause and no lift; those are what is left to
+try if he is still uneven. Its 1.25x tempo was taken out of the app because Joe found it too
+much. Measurements have agreed with me and disagreed with Joe about audio before, every
 time: his ear decides whether the crackle is gone and whether the voice still has its life.
 
 ## Compose text links are a trap
