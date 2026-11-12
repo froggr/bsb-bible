@@ -321,10 +321,10 @@ fun SettingsScreen(
             // The picker itself lives in the player, where it is reached while reading.
             // This is only the download.
             Label(
-                if (bedsHave == 0) "Quiet music under the reading, if you want it. Choose a bed in the player."
-                else "$bedsHave beds downloaded. Choose one in the player."
+                if (bedsHave == 0) "Music under the reading, if you want it: beats, or pads with no beat. Choose in the player."
+                else "$bedsHave of ${Beds.ALL.size} tracks downloaded. Choose beats or pads in the player."
             )
-            // Always offered, even with all eight on disk: a bed can be CORRECTED on the
+            // Always offered, even with every track on disk: a bed can be CORRECTED on the
             // server (three were, to cut vocal bleed), and fetchBeds now replaces any whose
             // size no longer matches. Hiding this button once the count was full left no way
             // to pull a fix down.
@@ -343,7 +343,7 @@ fun SettingsScreen(
                         }
                         bedsHave = Updates.bedsPresent(ctx)
                         busy = null
-                        message = if (n > 0) "$n beds ready. Choose one in the player." else
+                        message = if (n > 0) "$n tracks ready. Choose beats or pads in the player." else
                             "Could not download the music."
                     }
                 },
@@ -737,7 +737,7 @@ private fun GetBeds(
     Column(Modifier.padding(top = 4.dp)) {
         if (!rest) {
             Text(
-                "Eight beds \u00b7 instrumental \u00b7 about 12 MB",
+                "${Beds.ALL.count { it.kind == Beds.BEATS }} beats and ${Beds.ALL.count { it.kind == Beds.PADS }} pads \u00b7 no singing \u00b7 about 11 MB",
                 fontFamily = UiFont, fontSize = 12.sp, color = p.inkSoft,
             )
             Spacer(Modifier.height(9.dp))

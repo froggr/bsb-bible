@@ -110,7 +110,7 @@ object Heard {
     }
 
     /** How many letters put in, taken out or changed turn [a] into [b]. */
-    private fun apart(a: String, b: String): Int {
+    internal fun apart(a: String, b: String): Int {
         var prev = IntArray(b.length + 1) { it }
         var cur = IntArray(b.length + 1)
         for (i in 1..a.length) {
@@ -153,5 +153,130 @@ object Heard {
             val t = prev; prev = cur; cur = t
         }
         return (1f - prev.min().toFloat() / a.length).coerceAtLeast(0f)
+    }
+
+    /** What [Passage.follow] makes of what has been heard so far. */
+    class Followed(
+        /** The lines that have been said, by their place in the passage. */
+        val said: Set<Int>,
+        /** For each line, which of its words as the page shows them have been heard. */
+        val words: List<Set<Int>>,
+    )
+
+    /**
+     * A passage being said from memory, followed as it goes.
+     *
+     * A voice's turn waits for one known line, and [said] is all it needs. Saying a whole
+     * passage with nobody leading is another thing: nobody knows which line the speaker is
+     * on, they stop, they start a line again, they leave one out. So everything heard is
+     * laid against the whole passage at once, in order, and each word of it finds its
+     * place or is dropped. A line left out costs a little, so one stray "and" is not taken
+     * for the "and" thirty words on, and where the speaker has stopped costs nothing.
+     *
+     * Then each line is asked the same question a turn asks, [said], of the stretch that
+     * fell to it. So a line the recogniser mangled still counts, as it does in a turn. One
+     * thing is asked here that a turn does not ask: the line's end has to have been
+     * reached. Four words of five is the line said, but shown at that moment it would hand
+     * over the fifth while it was still being looked for.
+     *
+     * A word of the page is one stretch between spaces, as the card draws them; what is
+     * said for it may be two ("twenty-three") or a figure's words.
+     */
+    class Passage(lines: List<String>) {
+        private val want = ArrayList<String>()
+        /** Where each line begins in [want], and one more: where the last one ends. */
+        private val from = IntArray(lines.size + 1)
+        /** For each line, each word the page shows, as its stretch of [want]. */
+        private val shown = ArrayList<List<IntRange>>()
+        /** A word heard, against every word wanted. Worked out once: words come round again. */
+        private val like = HashMap<String, BooleanArray>()
+
+        init {
+            lines.forEachIndexed { l, line ->
+                from[l] = want.size
+                shown += line.split(' ').filter { w -> w.any { it.isLetterOrDigit() } }.map { w ->
+                    val a = want.size
+                    want += words(w)
+                    a until want.size
+                }
+            }
+            from[lines.size] = want.size
+        }
+
+        /** How many lines there are. */
+        val size: Int get() = shown.size
+
+        fun follow(got: List<String>): Followed {
+            val n = want.size
+            val m = got.size
+            if (n == 0 || m == 0) return Followed(emptySet(), shown.map { emptySet() })
+            val rows = Array(m) { j -> like.getOrPut(got[j]) { BooleanArray(n) { i -> alike(want[i], got[j]) } } }
+            // s[i, j]: the best that can be made of the first i words wanted and the first j heard.
+            val w = m + 1
+            val s = IntArray((n + 1) * w)
+            for (j in 1..m) s[j] = -j * DROP
+            for (i in 1..n) {
+                s[i * w] = -i * SKIP
+                val row = i * w
+                val above = row - w
+                for (j in 1..m) {
+                    var best = maxOf(s[above + j] - SKIP, s[row + j - 1] - DROP)
+                    if (rows[j - 1][i - 1]) best = maxOf(best, s[above + j - 1] + MATCH)
+                    s[row + j] = best
+                }
+            }
+            // It need not have been finished: the earliest place it can be said to have stopped.
+            var end = 0
+            for (i in 1..n) if (s[i * w + m] > s[end * w + m]) end = i
+            /** For each word wanted, the word heard that is it, or -1. */
+            val pair = IntArray(n) { -1 }
+            var i = end
+            var j = m
+            while (i > 0 && j > 0) {
+                val here = s[i * w + j]
+                when {
+                    rows[j - 1][i - 1] && here == s[(i - 1) * w + j - 1] + MATCH -> { pair[i - 1] = j - 1; i--; j-- }
+                    here == s[i * w + j - 1] - DROP -> j--
+                    else -> i--
+                }
+            }
+
+            val said = HashSet<Int>()
+            val words = ArrayList<Set<Int>>(shown.size)
+            for (l in shown.indices) {
+                val a = from[l]
+                val b = from[l + 1]
+                val lit = HashSet<Int>()
+                shown[l].forEachIndexed { k, r ->
+                    val n1 = r.last - r.first + 1
+                    if (n1 > 0 && r.count { pair[it] >= 0 } * 2 >= n1) lit += k
+                }
+                words += lit
+                if (b == a) continue
+                // What was heard for this line: all that lies between the last word heard
+                // of the lines before it and the first heard of the lines after.
+                var lo = -1
+                for (k in a - 1 downTo 0) if (pair[k] >= 0) { lo = pair[k]; break }
+                var hi = m
+                for (k in b until n) if (pair[k] >= 0) { hi = pair[k]; break }
+                if (hi - lo <= 1) continue
+                var last = -1
+                for (k in b - 1 downTo a) if (pair[k] >= 0) { last = pair[k]; break }
+                // Its end has been reached: its last word was heard, or the speaker has gone
+                // on to a later line, or something was said after the last of it that was
+                // heard, which is the rest of the line misheard.
+                val ended = pair[b - 1] >= 0 || hi < m || last < hi - 1
+                if (ended && said(want.subList(a, b), got.subList(lo + 1, hi))) said += l
+            }
+            return Followed(said, words)
+        }
+
+        private companion object {
+            const val MATCH = 8
+            /** A word wanted and not heard. */
+            const val SKIP = 2
+            /** A word heard that is none of the passage. */
+            const val DROP = 1
+        }
     }
 }

@@ -291,8 +291,18 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, ears: Ears, prefs: P
 
     // Pick the bed back up where it was left, including after the screen slept.
     LaunchedEffect(Unit) {
-        bed.restore(prefs.bed.ifBlank { null }, prefs.bedLevel)
+        // A choice saved before 0.53 names a bed that no longer exists: see Beds.kind.
+        val want = Beds.kind(prefs.bed)
+        if (want != null && want != prefs.bed) { prefs.bed = want; prefs.save() }
+        bed.restore(want, prefs.bedLevel)
         narrator.rate = prefs.rate
+        // Whoever had music on has it on still: the tracks that replaced the old beds are
+        // fetched without being asked for, and the old ones cleared away. And whoever had
+        // the music and has it off just now: or the picker tells them none was downloaded.
+        if ((want != null || Updates.bedsOld(ctx)) && Updates.bedsPresent(ctx) < Beds.ALL.size) {
+            withContext(Dispatchers.IO) { runCatching { Updates.fetchBeds(ctx) } }
+            if (want != null && !bed.playing && bed.track == null && prefs.bed == want) bed.restore(want, prefs.bedLevel)
+        }
     }
     // Open at a verse. A reference with a range ("Philippians 2:3-4") lands on its first
     // verse with the whole span selected, so it can be marked, noted or copied at once.
@@ -371,7 +381,12 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, ears: Ears, prefs: P
         }
     }
     // Hold the music down while a verse is sounding, and let it up between them.
-    LaunchedEffect(narrator.speaking) { bed.duck(narrator.speaking) }
+    // And bring it back if the notification's stop had silenced it: reading again is
+    // asking for the music that was chosen.
+    LaunchedEffect(narrator.speaking) {
+        if (narrator.speaking) bed.resume()
+        bed.duck(narrator.speaking)
+    }
     // The microphone is open for a line to be said: music in the room would be all it heard.
     LaunchedEffect(ears.listening) { bed.hush(ears.listening && Ears.aloud(ctx)) }
 
@@ -417,7 +432,7 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, ears: Ears, prefs: P
                     // notification stays up.
                     (bed.sounding ?: bed.track)?.let {
                         if (isNotEmpty()) append(" \u00b7 ")
-                        append(if (it == Bed.ROTATE) "Music" else Beds.label(it))
+                        append(Beds.label(it))
                     }
                 },
             )
@@ -612,6 +627,8 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, ears: Ears, prefs: P
     when (screen) {
         "search" -> SearchScreen(
             bible = bible,
+            ears = ears,
+            onListen = { if (narrator.speaking) narrator.stop() },
             onOpen = { v, to -> screen = "read"; narrator.reset(); land(v, to) },
             onClose = { screen = "read" },
         )

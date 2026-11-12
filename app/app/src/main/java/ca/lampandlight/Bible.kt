@@ -315,6 +315,86 @@ class Bible private constructor(private val db: SQLiteDatabase) {
             buildList { while (c.moveToNext()) add(c.getInt(0) to c.getString(1)) }
         }
 
+    /** What [nearest] found, and the words it looked for: its own spelling of them, not the asker's. */
+    class Near(val verses: List<Pair<VerseId, String>>, val terms: List<String>)
+
+    /** Every word in the text, and how many verses have it. Read once, from the index itself. */
+    private val vocabulary: Map<String, Int> by lazy {
+        runCatching {
+            // A temporary table belongs to one connection, and a transaction keeps to one.
+            // Nothing is committed, so nothing of it is left behind.
+            db.beginTransaction()
+            try {
+                db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS temp.terms USING fts4aux(main, verses_fts)")
+                db.rawQuery("SELECT term, documents FROM temp.terms WHERE col='*'", null).use { c ->
+                    buildMap(16_000) { while (c.moveToNext()) put(c.getString(0), c.getInt(1)) }
+                }
+            } finally { db.endTransaction() }
+        }.onFailure { Log.w(TAG, "no vocabulary: $it") }.getOrDefault(emptyMap())
+    }
+
+    private val verseCount: Int by lazy {
+        db.rawQuery("SELECT count(*) FROM verses", null).use { c -> if (c.moveToNext()) c.getInt(0) else 31_000 }
+    }
+
+    /**
+     * The verses that come nearest to holding [words], for when no verse holds them all:
+     * a word misspelled, or misheard by the microphone, or one too many.
+     *
+     * A word that is not in the Bible is taken for the words that are nearly it, so
+     * "shepard" finds "shepherd". A word counts for more the rarer it is: "shepherd" says
+     * which verse is meant and "the" says nothing, so the commonest are not looked up at
+     * all. A verse has to carry three fifths of what the words are worth together, and the
+     * list is the best of those first. Empty when nothing comes that near.
+     */
+    fun nearest(words: List<String>, limit: Int = 40): Near {
+        val known = vocabulary
+        if (known.isEmpty()) return Near(emptyList(), emptyList())
+        val score = HashMap<Int, Float>()
+        val used = ArrayList<String>()
+        var whole = 0f
+        var telling = false
+        for (w in words.distinct().filter { it.length > 1 }.take(12)) {
+            val terms = if (w in known) listOf(w)
+                else known.keys.filter { it[0] == w[0] && Heard.alike(w, it) }.sortedByDescending { known[it] }.take(3)
+            if (terms.isEmpty()) continue
+            val worth = kotlin.math.ln(verseCount.toFloat() / terms.sumOf { known[it] ?: 0 }.coerceAtLeast(1))
+            if (worth < COMMON) continue
+            if (worth >= TELLING) telling = true
+            whole += worth
+            used += terms
+            val seen = HashSet<Int>()
+            terms.forEachIndexed { rank, t ->
+                // Of the words it might have been, the commonest is the likeliest, by a little.
+                val mine = worth * (1f - 0.04f * rank)
+                db.rawQuery("SELECT docid FROM verses_fts WHERE verses_fts MATCH ?", arrayOf("\"$t\"")).use { c ->
+                    while (c.moveToNext()) {
+                        val id = c.getInt(0)
+                        if (seen.add(id)) score[id] = (score[id] ?: 0f) + mine
+                    }
+                }
+            }
+        }
+        // "the", "is" and "my" between them point nowhere.
+        if (!telling) return Near(emptyList(), emptyList())
+        val best = score.entries.filter { it.value >= whole * ENOUGH }
+            .sortedWith(compareByDescending<Map.Entry<Int, Float>> { it.value }.thenBy { it.key })
+            .take(limit * 3)
+        if (best.isEmpty()) return Near(emptyList(), emptyList())
+        val text = HashMap<Int, String>()
+        db.rawQuery("SELECT id,text FROM verses WHERE id IN (${best.joinToString(",") { it.key.toString() }})", null).use { c ->
+            while (c.moveToNext()) text[c.getInt(0)] = c.getString(1)
+        }
+        // Two verses can hold the same words, and only one of them in the order they were
+        // said: "be still and know that" is Psalm 46, and 2 Chronicles 25:16 has all five
+        // scattered through it. So the order counts for something, after the words.
+        val ordered = best.mapNotNull { e ->
+            val t = text[e.key] ?: return@mapNotNull null
+            Triple(e.key, t, e.value * (1f + ORDER * Heard.score(words, Heard.words(t))))
+        }.sortedWith(compareByDescending<Triple<Int, String, Float>> { it.third }.thenBy { it.first }).take(limit)
+        return Near(ordered.map { it.first to it.second }, used)
+    }
+
     /**
      * The verses from [from] to [to], inclusive, as plain text — a passage quoted somewhere
      * else and looked up. A whole chapter is asked for as verse 1 to verse 999.
@@ -393,6 +473,17 @@ class Bible private constructor(private val db: SQLiteDatabase) {
 
     companion object {
         private const val TAG = "lamplight"
+
+        // What a word is worth to [nearest] is the logarithm of how rare it is: 0.3 is a
+        // word in three verses of four, 3 a word in one of twenty.
+        /** Below this a word is in most verses and is not looked up. */
+        private const val COMMON = 0.3f
+        /** One word at least has to be worth this, or the words point nowhere. */
+        private const val TELLING = 3f
+        /** How much of what the words are worth a verse has to carry. */
+        private const val ENOUGH = 0.6f
+        /** What saying the words in the verse's own order adds to what they are worth. */
+        private const val ORDER = 0.25f
         const val ASSET = "bible-reading.db"
 
         /** 0 when the file predates the stamp, which is exactly the case we must replace. */

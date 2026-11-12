@@ -122,20 +122,64 @@ fun rememberHearSwitch(prefs: Prefs): HearSwitch {
     }
 }
 
+/** The microphone for one thing said and no more: asked for by a tap each time, so there is no switch to keep. */
+class Voice(val ready: Boolean, val ask: () -> Unit)
+
+/**
+ * The way to the microphone from somewhere that is not a verse being learned. [Voice.ask]
+ * does whatever has to come first, the download or the leave to listen, under [title] and
+ * [about], and calls [onReady] once there is nothing left in the way.
+ */
+@Composable
+fun rememberVoice(title: String, about: String, onReady: () -> Unit): Voice {
+    val ctx = LocalContext.current
+    var present by remember { mutableStateOf(Ears.present(ctx)) }
+    var allowed by remember { mutableStateOf(Ears.allowed(ctx)) }
+    var offering by remember { mutableStateOf(false) }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { yes ->
+        allowed = yes
+        if (yes) { offering = false; onReady() } else offering = true
+    }
+    if (offering) HearSheet(
+        present = present,
+        title = title,
+        about = about,
+        onFetched = {
+            present = true
+            allowed = Ears.allowed(ctx)
+            if (allowed) { offering = false; onReady() } else ask.launch(Manifest.permission.RECORD_AUDIO)
+        },
+        onDismiss = { offering = false },
+    )
+    return Voice(ready = present && allowed) {
+        allowed = Ears.allowed(ctx)
+        when {
+            !present -> offering = true
+            !allowed -> ask.launch(Manifest.permission.RECORD_AUDIO)
+            else -> onReady()
+        }
+    }
+}
+
 /**
  * The mark on a verse's card. Quiet ink while nothing listens, gold while it is switched on,
  * a soft disc behind it while the microphone is open, and its head filled while somebody is
  * heard speaking. A tap switches it.
  */
 @Composable
-fun HearMark(on: Boolean, listening: Boolean, voiced: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun HearMark(
+    on: Boolean, listening: Boolean, voiced: Boolean, modifier: Modifier = Modifier,
+    /** What it is for, read out to somebody who cannot see it. */
+    label: String = if (on) "Listening for your line: on" else "Listening for your line: off",
+    onClick: () -> Unit,
+) {
     val p = LocalPalette.current
     val colour by animateColorAsState(if (on) p.gold else p.inkSoft.copy(alpha = 0.75f), tween(220), label = "ear")
     val open by animateFloatAsState(if (listening) 1f else 0f, tween(260), label = "earOpen")
     val full by animateFloatAsState(if (listening && voiced) 1f else 0f, tween(140), label = "earFull")
     Box(
         modifier.size(40.dp)
-            .semantics { contentDescription = if (on) "Listening for your line: on" else "Listening for your line: off" }
+            .semantics { contentDescription = label }
             .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { onClick() },
         contentAlignment = Alignment.Center,
     ) {
@@ -155,7 +199,15 @@ fun HearMark(on: Boolean, listening: Boolean, voiced: Boolean, modifier: Modifie
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HearSheet(present: Boolean, onFetched: () -> Unit, onDismiss: () -> Unit) {
+private fun HearSheet(
+    present: Boolean,
+    title: String = "Hearing your line",
+    about: String = "When it is your turn the app can listen, and go on by itself once you have said the " +
+        "line. Say a verse from memory and it fills in as you are heard: all of it said, with " +
+        "nothing looked at, is the verse known. It never marks one missed.",
+    onFetched: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     val p = LocalPalette.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -173,15 +225,14 @@ private fun HearSheet(present: Boolean, onFetched: () -> Unit, onDismiss: () -> 
                 EarMark(p.gold, size = 22.dp)
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    "Hearing your line",
+                    title,
                     fontFamily = DisplayFont, fontSize = 21.sp, fontWeight = FontWeight.SemiBold, color = p.ink,
                 )
             }
             Spacer(Modifier.height(12.dp))
             Text(
                 if (present) "The microphone is switched off for this app. It can be allowed in the phone's settings."
-                else "When it is your turn the app can listen, and go on by itself once you have said the " +
-                    "line. It marks nothing: whether you had it is still yours to say.",
+                else about,
                 fontFamily = UiFont, fontSize = 14.sp, lineHeight = 22.sp, color = p.ink,
             )
             Spacer(Modifier.height(10.dp))

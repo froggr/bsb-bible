@@ -27,6 +27,7 @@ import com.k2fsa.sherpa.onnx.VadModelConfig
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Hearing a line said, on the phone and nowhere else.
@@ -65,11 +66,14 @@ class Ears(private val ctx: Context) {
     @Volatile private var turn = 0
     /** Turns begun since the models were loaded. Only the stand-in for a microphone counts them. */
     private var turns = 0
+    /** Which load is wanted. One that finishes after [release] is not to say it is loaded. */
+    private var loads = 0
 
     /** Bring the models into memory, if they are on the phone. Returns at once. */
     fun load() {
         if (loaded || loading || !present(ctx)) return
         loading = true
+        val wanted = ++loads
         val dir = dir(ctx)
         work.execute {
             val began = SystemClock.elapsedRealtime()
@@ -103,7 +107,7 @@ class Ears(private val ctx: Context) {
                 recognizer = r
             }.onFailure { Log.w(TAG, "could not load: $it") }.isSuccess
             Log.d(TAG, "loaded $ok in ${SystemClock.elapsedRealtime() - began} ms")
-            main.post { loading = false; loaded = ok }
+            main.post { if (wanted == loads) { loading = false; loaded = ok } }
         }
     }
 
@@ -111,13 +115,23 @@ class Ears(private val ctx: Context) {
      * Open the microphone and report what is said, a stretch at a time, until [stop]. Each
      * stretch ends at a pause, so a line said in two breaths arrives as two. [onHeard] is
      * called on the main thread. Does nothing without the models or without leave to listen.
+     *
+     * With [onPartial], what a stretch has come to so far is reported while it is still
+     * being said, a little under once a second, for a page that fills in as it listens. It
+     * is the whole stretch so far each time, not what is new, and less its last word, which
+     * is as likely as not half a word. When the stretch ends [onHeard] has the last say and
+     * what [onPartial] gave for it is to be thrown away.
+     *
+     * Returns this turn's number, for [stop] to be told which turn it means, or 0 if
+     * nothing was opened.
      */
-    fun listen(onHeard: (String) -> Unit) {
-        if (!loaded || !allowed(ctx)) return
+    fun listen(onPartial: ((String) -> Unit)? = null, onHeard: (String) -> Unit): Int {
+        if (!loaded || !allowed(ctx)) return 0
         val mine = ++turn
         val count = ++turns
         listening = true; voiced = false
-        Thread({ capture(mine, count, onHeard) }, "ears-mic").apply { isDaemon = true }.start()
+        Thread({ capture(mine, count, onPartial, onHeard) }, "ears-mic").apply { isDaemon = true }.start()
+        return mine
     }
 
     /** Close the microphone. Whatever was still being worked out is thrown away. */
@@ -126,10 +140,20 @@ class Ears(private val ctx: Context) {
         listening = false; voiced = false
     }
 
+    /**
+     * Close the microphone if it is still open for [mine]. Two pages can be on screen for a
+     * moment as one gives way to the other, and the one leaving must not close what the
+     * one arriving has just opened.
+     */
+    fun stop(mine: Int) {
+        if (mine != 0 && turn == mine) stop()
+    }
+
     /** Let the models go. They are a few hundred megabytes of memory nobody else can use. */
     fun release() {
         stop()
-        loaded = false; turns = 0
+        loads++
+        loaded = false; loading = false; turns = 0
         work.execute {
             // The detector belongs to a turn while there is one; wait for it to be let go.
             synchronized(mic) { runCatching { vad?.release() }; vad = null }
@@ -137,7 +161,9 @@ class Ears(private val ctx: Context) {
         }
     }
 
-    private fun capture(mine: Int, count: Int, onHeard: (String) -> Unit) = synchronized(mic) {
+    private fun capture(
+        mine: Int, count: Int, onPartial: ((String) -> Unit)?, onHeard: (String) -> Unit,
+    ) = synchronized(mic) {
         val v = vad ?: return@synchronized
         if (turn != mine) return@synchronized
         val source = planted(count) ?: runCatching { Microphone() }
@@ -153,10 +179,40 @@ class Ears(private val ctx: Context) {
             // pipe, when the turn begins. It is not the listener.
             var skip = RATE * SKIP_MS / 1000
             var speaking = false
+            // The stretch being said, kept so that it can be worked out before it ends. The
+            // detector is slow to say somebody has begun, so the moment before is kept too.
+            val lead = ArrayDeque<FloatArray>()
+            var live = FloatArray(RATE * 4)
+            var have = 0
+            var told = 0
+            val busy = AtomicBoolean(false)
             while (turn == mine && source.read(window)) {
                 if (skip > 0) { skip -= WINDOW; continue }
                 v.acceptWaveform(window)
                 val now = v.isSpeechDetected()
+                if (onPartial != null) {
+                    if (now) {
+                        if (!speaking) {
+                            have = 0; told = 0
+                            for (w in lead) { w.copyInto(live, have); have += WINDOW }
+                            lead.clear()
+                        }
+                        if (have + WINDOW > live.size) live = live.copyOf(live.size * 2)
+                        window.copyInto(live, have); have += WINDOW
+                        // One at a time: on a slow phone they come less often, and never
+                        // queue up in front of the stretch's last word.
+                        if (have - told >= PARTIAL && have <= PARTIAL_MOST && busy.compareAndSet(false, true)) {
+                            told = have
+                            val part = live.copyOf(have)
+                            work.execute {
+                                try { decode(mine, part, onPartial, whole = false) } finally { busy.set(false) }
+                            }
+                        }
+                    } else {
+                        lead.addLast(window.copyOf())
+                        if (lead.size > LEAD) lead.removeFirst()
+                    }
+                }
                 if (now != speaking) {
                     speaking = now
                     main.post { if (turn == mine) voiced = now }
@@ -164,6 +220,7 @@ class Ears(private val ctx: Context) {
                 while (!v.empty()) {
                     val samples = v.front().samples
                     v.pop()
+                    have = 0; told = 0
                     work.execute { decode(mine, samples, onHeard) }
                 }
             }
@@ -175,21 +232,24 @@ class Ears(private val ctx: Context) {
         }
     }
 
-    private fun decode(mine: Int, samples: FloatArray, onHeard: (String) -> Unit) {
+    /** [whole] is a stretch that has ended; otherwise it is one still being said. */
+    private fun decode(mine: Int, samples: FloatArray, onHeard: (String) -> Unit, whole: Boolean = true) {
         if (turn != mine) return
         val began = SystemClock.elapsedRealtime()
         val r = recognizer ?: return
         val s = r.createStream()
-        val text = try {
+        var text = try {
             s.acceptWaveform(samples, RATE)
             r.decode(s)
             r.getResult(s).text.trim()
         } finally { s.release() }
         // How long it took is worth knowing on a phone. What was said is nobody's business:
         // it is written down only by a build made for testing.
-        Log.d(TAG, "%.1f s of speech worked out in %d ms%s".format(
-            samples.size / RATE.toFloat(), SystemClock.elapsedRealtime() - began,
-            if (testing()) ": $text" else ""))
+        Log.d(TAG, "%.1f s of speech %s in %d ms%s".format(
+            samples.size / RATE.toFloat(), if (whole) "worked out" else "so far",
+            SystemClock.elapsedRealtime() - began, if (testing()) ": $text" else ""))
+        // The last word of a stretch still being said is as likely as not half a word.
+        if (!whole) text = text.substringBeforeLast(' ', "")
         if (text.isNotEmpty()) main.post { if (turn == mine) onHeard(text) }
     }
 
@@ -298,6 +358,12 @@ class Ears(private val ctx: Context) {
         private const val QUIET = 0.45f
         /** How much of the start of a turn is not listened to. */
         private const val SKIP_MS = 350
+        /** How much more has to have been said before a stretch is worked out again: 0.8 s. */
+        private const val PARTIAL = RATE * 4 / 5
+        /** Past this a stretch is left until it ends: working it out again costs too much. */
+        private const val PARTIAL_MOST = RATE * 15
+        /** How many windows from before the detector spoke up are kept: about 0.4 s. */
+        private const val LEAD = 12
 
         const val DIR = "ears"
 

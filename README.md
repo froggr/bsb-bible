@@ -25,7 +25,9 @@ Needs Android 10 or newer, and about 120 MB free once the voice is downloaded.
 - **Read aloud.** A small neural voice runs on the phone — not a robotic system voice, and not
   a cloud service. It highlights each phrase as it is spoken, reads the section headings, keeps
   reading with the screen off, and carries on into the next chapter unless you tell it to stop.
-  Fourteen voices to choose from. Optional quiet instrumental music can play underneath.
+  Fourteen voices to choose from. Music can play underneath: *Beats*, lo-fi with drums all
+  the way through, or *Pads*, with none. Each is a set of whole tracks played one into the
+  next, none of them twice until all have been heard.
 - **Marking is fast.** Tap a verse number to select the verse; tap another and everything
   between is selected. Then pick a colour, write a note, or copy the verses with their
   reference, and it applies to the whole span. Press and drag works too. Built to be usable
@@ -48,9 +50,11 @@ Needs Android 10 or newer, and about 120 MB free once the voice is downloaded.
   after it, up to six, to make it a passage. The voice says it a phrase at a time and waits
   for you to say each one back: press *Go on* when you have. Or tap the microphone beside the
   cue and it hears you say the line and goes on by itself. That is worked out on the phone:
-  what you say is sent nowhere and not kept, and it marks nothing. The next day only the
-  first letter of every word shows, then nothing but the blanks, and it comes back after
-  longer and longer as you keep it. You say whether you had it. *Listen, and say them with the voice* goes
+  what you say is sent nowhere and not kept. The next day only the first letter of every word
+  shows, then nothing but the blanks, and it comes back after longer and longer as you keep
+  it. You say whether you had it, or with the microphone on you say the verse and the words
+  fill in as they are heard: all of it said with nothing looked at is marked for you, and
+  anything less is left for you to say. It never marks a verse missed. *Listen, and say them with the voice* goes
   through everything you are learning with the screen off, for the car or the dishes; there
   it leaves a silence the length of the phrase and goes on by itself.
 - **It asks where things are.** Before you carry on in a book, the page asks what the last
@@ -64,6 +68,9 @@ Needs Android 10 or newer, and about 120 MB free once the voice is downloaded.
   time, and they are set in the same type and read in the same voice as the Bible. Every
   Scripture reference in them opens its passage in a sheet over the page, so the place in
   the book is never lost. Books stay on the phone: they are not uploaded and never ship.
+- **Search by typing or by saying it.** A reference ("John three sixteen") is offered as a
+  place to go; words bring the verses that have them, and when no verse has them all, the
+  nearest ones, so a line half remembered or misheard still finds its verse.
 - **It remembers where you were**, down to the verse.
 - **Other apps can open it at a passage.** A `bsb://open?ref=John 3:16` link, or a BibleGateway,
   YouVersion or BibleHub link, opens the app on that verse (details under *Opening the app at a
@@ -83,8 +90,8 @@ The app works fully offline on first install. From Settings you can add:
 - the **voice** for reading aloud (about 60 MB, plus about 4 MB for the fourteen voices)
 - **study material** — Strong's numbers, cross-references (about 20 MB)
 - **commentary** (about 15 MB)
-- **music beds** — eight instrumental tracks (about 12 MB)
-- **hearing your line** when you learn a verse (about 137 MB)
+- **music** — fourteen instrumental tracks, nine with a beat and five without (about 11 MB)
+- **hearing** — for saying a verse you are learning, and for searching by voice (about 137 MB)
 
 ## Why it is not on the Play Store
 
@@ -132,9 +139,9 @@ known broken.
 | `data/bible-core.db` | 77 MB: text plus the word layer and cross-references. Build input, not shipped |
 | `data/bible-study.db` | 68 MB: Strong's and cross-references. Downloaded on request (20 MB gzipped) |
 | `data/bible-commentary.db` | 45 MB: Tyndale + Wesley + Matthew Henry + JFB, and where Wesley's lemmas fall in the BSB. Downloaded on request (15 MB gzipped) |
-| `data/beds/` | The music beds that SHIP. Not a source directory — see below |
-| `data/beds/_withvocals/` | Untouched originals for stillness, psalter, evening |
-| `public/beds/` | Untouched originals for morning, shepherd, vigil, upper-room, wilderness |
+| `data/beds.py` | Builds the music from `~/Music/Scripture Radio`: cuts, levels and encodes each track, then measures the encoded file for a voice with demucs. `--verify` measures again and changes nothing |
+| `data/beds/` | The fourteen tracks that SHIP, and `beds.json`, the measurement of each. `_v1/` and `_v2/` are older sets, not in git; `_withvocals/` is three old originals. None of them ships |
+| `public/beds/` | A copy of `data/beds/` for `serve.py` |
 | `data/heard_pairs.tsv` | 5,460 measured pairs of a line and what the recogniser heard, which `HeardTest` scores on every run |
 | `tools/` | Helpers for trying the app on an emulator: build and install, screenshot, tap by text, make a test recording. See `CLAUDE.md` |
 | `app/keystore/` | The release signing key. Irreplaceable — read `app/KEYSTORE-README.md` |
@@ -290,13 +297,13 @@ which question a section asks next (`Quiz.choose`) and when one is due to be gon
 | Reader | chapter text, narration with the word lit as it is spoken, tap a number to select, long-press for the sheet |
 | Study sheet | word (Hebrew/Greek, Strong's, parsing), cross-references, translators' notes, commentary |
 | Note sheet | writing on a verse, with the verse in front of you |
-| Search | full text, debounced, matches emboldened |
+| Search | full text, debounced, matches emboldened; the nearest verses when none has every word; a microphone to say it |
 | Marks and notes | everything coloured or written on |
 | Go over | the verses being learned, the chapters to call to mind and the questions that are due, eight to a round; the list of verses; the hands-free listen |
 | Books | the shelf: epubs brought in from the phone, with covers, the place kept, sort and filter |
 | Book | one book open: chapter text in the app's own type, narration, citations that open their passage |
 | Settings | text size, theme, voice, study downloads, music, manual update check |
-| Player | read aloud, speed, voice, music bed, volume |
+| Player | read aloud, speed, voice, music (None, Beats, Pads), volume |
 
 **Study mode** interleaves the apparatus between verses — notes, footnotes, commentary,
 cross-references — as its own `Row` types, so the LazyColumn still only composes what is on
@@ -331,11 +338,29 @@ books of the Psalms, Psalm 119's Hebrew letters, and who is speaking in the Song
 The panel is a `Row.Recall` at the head of the next chapter, and its two voice lines use the
 same asking and waiting as a question under the key `Places.KEY`.
 
-**Music beds** play their run-in once and then loop a region of the file forever
-(`Beds.Item.loopStartMs`/`loopEndMs`, found by PyMusicLooper). The region is decoded to PCM once
-— about 2 MB per 22 s at 24 kHz mono — because no Android media player loops part of an Opus file
-without a gap. **Rotate** moves through all
-eight, shuffled, each once before any repeats.
+**Hearing** is `Ears.kt` (the recogniser and the microphone: sherpa-onnx, Parakeet and Silero
+VAD), `Heard.kt` (the matcher, plain loops) and `Hearing.kt` (the mark and the sheet). A turn
+with the voice asks only whether the one line was said (`Heard.said`). The from-memory test
+lays everything heard against the whole passage (`Heard.Passage.follow`), fills in the words
+as guesses arrive every 0.8 s of speech, and writes "I had it" only when every line was said
+while still covered. Nothing heard ever writes "Not yet".
+
+**Search by voice** uses the same recogniser, loaded at the first tap of the microphone in
+the search box and let go on leaving. `Reference.spoken` reads a reference as the recogniser
+writes it ("First Corinthians thirteen, versus four to seven"). `Bible.nearest` is the
+fallback when no verse has every word: each word weighed by how rare it is in the Bible,
+near spellings looked up for a word the Bible does not have, and the order of the words
+breaking ties.
+
+**The voice is levelled after it is made** (`Steady.kt`): a 60 Hz high-pass, each clause
+brought toward one level, and a look-ahead limiter on the peaks. Some voices come out of the
+model with clauses 13 dB apart.
+
+**Music** is two kinds, `beats` and `pads` (`Beds.ALL`). What is chosen is the kind; `Bed`
+plays every track of it, shuffled, before any comes round again, and nothing loops. Two
+`BedStream`s (`BedAudio.kt`) are decoded as they play and mixed in the samples for the five
+seconds they share, an equal-power crossfade, into one `AudioTrack`. Until 0.53 it was eight
+tracks each cut to a one-minute loop.
 
 Traps worth knowing, all found on device:
 
@@ -344,15 +369,13 @@ Traps worth knowing, all found on device:
   id range instead.
 - **Compose's downloadable fonts need Google Play Services.** Without it the text quietly
   falls back to the system sans. The faces are bundled in `res/font` instead.
-- **A loop join must never be crossfaded.** Fading a file's end into its start fades the loop
-  back into the *intro* — music the track never returns to — and smears seconds over itself.
-  ExoPlayer clips to the loop region and repeats it with no fade. A crossfade is correct only
-  when changing to a *different* bed.
-- **Neither MediaPlayer nor ExoPlayer can loop a REGION of an Opus file gaplessly.** MediaPlayer
-  loops only whole files; ExoPlayer's `ClippingMediaSource` forces a renderer reset at every wrap
-  because `MimeTypes.allSamplesAreSyncSamples()` does not list Opus, which rebuilds the AudioTrack
-  and costs 100-150 ms of silence. The bed decodes its loop to PCM once (`BedAudio`) and writes it
-  round and round through `AudioTrack`, the same way the narrator works.
+- **Open the next track before fading to it.** Fading the one playing and opening the next
+  afterwards is why the music once stopped dead at a change and then started again. The next is opened and decoding before the
+  crossfade begins.
+- **Neither MediaPlayer nor ExoPlayer can loop a REGION of an Opus file gaplessly** (100-150 ms
+  of silence at every wrap; the detail is in `STATUS.md`). It no longer matters, since nothing
+  loops, but it is why the music is decoded to PCM and written through `AudioTrack`, the same
+  way the narrator works.
 - **Two chained `pointerInput` blocks cannot share a long press.** `detectTapGestures` consumes
   the initial `down` unconditionally, and a consumed change makes `awaitLongPressOrCancellation`
   give up. Tap, double-tap, long-press and drag all live in ONE `awaitEachGesture` in
@@ -437,14 +460,17 @@ cd app && ANDROID_ABIS=arm64-v8a ./gradlew assembleRelease
 ```
 
 Then stage the assets with FLAT names — GitHub serves release assets from one directory, so
-`/beds/stillness.opus` cannot exist there. `Updates.resolve()` rewrites `/` to `-` when the host
+`/beds/still-light.opus` cannot exist there. `Updates.resolve()` rewrites `/` to `-` when the host
 contains `/releases/`, and leaves paths alone otherwise, so one manifest serves both hosts:
 
 | manifest path | GitHub asset |
 |---|---|
 | `/app.apk` | `app.apk` |
 | `/data/bible-study.db.gz` | `data-bible-study.db.gz` |
-| `/beds/stillness.opus` | `beds-stillness.opus` |
+| `/beds/still-light.opus` | `beds-still-light.opus` |
+
+All fourteen tracks in `data/beds/` go on every release from 0.53. A phone that had the old
+eight fetches the new set at its first start and then clears the old files.
 
 The five files the app needs to hear a line (136 MB) are not in the manifest and not on every
 release. They are assets of **`v0.52` only**, named `ears-encoder.int8.onnx` and so on, and

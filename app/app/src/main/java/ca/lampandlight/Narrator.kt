@@ -778,7 +778,12 @@ class Narrator(private val ctx: Context) {
         val raw = FloatArray(parts.sumOf { it.size })
         var at = 0
         parts.forEach { System.arraycopy(it, 0, raw, at, it.size); at += it.size }
-        return trimmed(raw, clause.pause)
+        val out = trimmed(raw, clause.pause)
+        // The model sets each clause's level for itself, and some voices set it wildly:
+        // see Steady. Evened here, once, where the whole clause can be seen.
+        val told = Steady.even(out)
+        Log.d(TAG, "evened %+.1f dB, peaks held %.1f dB".format(told.gain, told.held))
+        return out
     }
 
     /**

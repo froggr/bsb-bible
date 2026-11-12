@@ -1,0 +1,254 @@
+{
+ "still-light": {
+  "source": "Lo-Fi/Still Light (rainy piano).mp3",
+  "cut": [
+   0.0,
+   150.0
+  ],
+  "gain_db": -2.0,
+  "set": "beats",
+  "vocal_db": -63.4,
+  "vocal_worst_db": -47.7,
+  "vocal_worst_at": 5,
+  "drums_db": -1.7,
+  "secs": 150.0,
+  "lufs": -18.5,
+  "peak_db": -3.0,
+  "bytes": 1225947,
+  "ok": true
+ },
+ "tender-presence": {
+  "source": "Lo-Fi/Tender Presence (rainy piano).mp3",
+  "cut": [
+   0.0,
+   84.0
+  ],
+  "gain_db": -3.2,
+  "set": "beats",
+  "vocal_db": -58.9,
+  "vocal_worst_db": -42.1,
+  "vocal_worst_at": 0,
+  "drums_db": -2.8,
+  "secs": 84.0,
+  "lufs": -18.5,
+  "peak_db": -4.4,
+  "bytes": 729745,
+  "ok": true
+ },
+ "holy-breath": {
+  "source": "Lo-Fi/Holy Breath (jazzy guitar).mp3",
+  "cut": [
+   0.0,
+   79.785
+  ],
+  "gain_db": -1.9,
+  "set": "beats",
+  "vocal_db": -63.2,
+  "vocal_worst_db": -61.6,
+  "vocal_worst_at": 20,
+  "drums_db": -2.2,
+  "secs": 79.79,
+  "lufs": -18.5,
+  "peak_db": -3.6,
+  "bytes": 648052,
+  "ok": true
+ },
+ "morning-light": {
+  "source": "Lo-Fi/Morning Light (jazzhop).mp3",
+  "cut": [
+   0.0,
+   74.0
+  ],
+  "gain_db": -1.6,
+  "set": "beats",
+  "vocal_db": -66.0,
+  "vocal_worst_db": -57.5,
+  "vocal_worst_at": 0,
+  "drums_db": -2.6,
+  "secs": 74.0,
+  "lufs": -18.4,
+  "peak_db": -2.9,
+  "bytes": 672450,
+  "ok": true
+ },
+ "still-refuge": {
+  "source": "Lo-Fi/Still Refuge (mellow keys).mp3",
+  "cut": [
+   0.0,
+   114.644
+  ],
+  "gain_db": -0.7,
+  "set": "beats",
+  "vocal_db": -58.1,
+  "vocal_worst_db": -51.5,
+  "vocal_worst_at": 70,
+  "drums_db": -3.3,
+  "secs": 114.64,
+  "lufs": -18.5,
+  "peak_db": -2.6,
+  "bytes": 1018463,
+  "ok": true
+ },
+ "resting-grace": {
+  "source": "Lo-Fi/Resting Grace (dusty soul).mp3",
+  "cut": [
+   0.0,
+   73.309
+  ],
+  "gain_db": -2.2,
+  "set": "beats",
+  "vocal_db": -62.9,
+  "vocal_worst_db": -57.4,
+  "vocal_worst_at": 60,
+  "drums_db": -3.9,
+  "secs": 73.31,
+  "lufs": -18.5,
+  "peak_db": -3.1,
+  "bytes": 618018,
+  "ok": true
+ },
+ "morning-shelter": {
+  "source": "Lo-Fi/Morning Shelter (study beats).mp3",
+  "cut": [
+   0.0,
+   105.0
+  ],
+  "gain_db": -1.6,
+  "set": "beats",
+  "vocal_db": -64.2,
+  "vocal_worst_db": -58.1,
+  "vocal_worst_at": 5,
+  "drums_db": -3.9,
+  "secs": 105.0,
+  "lufs": -18.5,
+  "peak_db": -3.0,
+  "bytes": 847393,
+  "ok": true
+ },
+ "abiding-mercy": {
+  "source": "Lo-Fi/Abiding Mercy (study beats).mp3",
+  "cut": [
+   0.0,
+   108.0
+  ],
+  "gain_db": -1.4,
+  "set": "beats",
+  "vocal_db": -61.6,
+  "vocal_worst_db": -54.7,
+  "vocal_worst_at": 95,
+  "drums_db": -5.3,
+  "secs": 108.0,
+  "lufs": -18.5,
+  "peak_db": -2.7,
+  "bytes": 878534,
+  "ok": true
+ },
+ "waiting-mercy": {
+  "source": "Lo-Fi/Waiting Mercy (late night).mp3",
+  "cut": [
+   0.0,
+   101.0
+  ],
+  "gain_db": -1.1,
+  "set": "beats",
+  "vocal_db": -61.6,
+  "vocal_worst_db": -52.6,
+  "vocal_worst_at": 0,
+  "drums_db": -5.8,
+  "secs": 101.0,
+  "lufs": -18.5,
+  "peak_db": -3.4,
+  "bytes": 903352,
+  "ok": true
+ },
+ "tender-grace": {
+  "source": "Prayer Room/Tender Grace (soft organ drone).mp3",
+  "cut": [
+   0.286,
+   80.854
+  ],
+  "gain_db": 0.1,
+  "set": "pads",
+  "vocal_db": -60.5,
+  "vocal_worst_db": -58.2,
+  "vocal_worst_at": 45,
+  "drums_db": -46.2,
+  "secs": 80.57,
+  "lufs": -18.5,
+  "peak_db": -6.5,
+  "bytes": 480258,
+  "ok": true
+ },
+ "abiding-light": {
+  "source": "Prayer Room/Abiding Light (pads and far piano).mp3",
+  "cut": [
+   0.191,
+   106.891
+  ],
+  "gain_db": 1.4,
+  "set": "pads",
+  "vocal_db": -63.8,
+  "vocal_worst_db": -62.0,
+  "vocal_worst_at": 0,
+  "drums_db": -47.1,
+  "secs": 106.7,
+  "lufs": -18.5,
+  "peak_db": -5.7,
+  "bytes": 627474,
+  "ok": true
+ },
+ "quiet-stillness": {
+  "source": "Prayer Room/Quiet Stillness (warm pads).mp3",
+  "cut": [
+   0.491,
+   91.84
+  ],
+  "gain_db": 1.6,
+  "set": "pads",
+  "vocal_db": -59.9,
+  "vocal_worst_db": -56.5,
+  "vocal_worst_at": 45,
+  "drums_db": -49.3,
+  "secs": 91.35,
+  "lufs": -18.5,
+  "peak_db": -4.5,
+  "bytes": 550241,
+  "ok": true
+ },
+ "resting-breath": {
+  "source": "Prayer Room/Resting Breath (warm pads).mp3",
+  "cut": [
+   0.415,
+   109.36
+  ],
+  "gain_db": -0.5,
+  "set": "pads",
+  "vocal_db": -59.7,
+  "vocal_worst_db": -58.3,
+  "vocal_worst_at": 25,
+  "drums_db": -50.6,
+  "secs": 108.95,
+  "lufs": -18.5,
+  "peak_db": -6.6,
+  "bytes": 651740,
+  "ok": true
+ },
+ "gentle-refuge": {
+  "source": "Prayer Room/Gentle Refuge (breath pads).mp3",
+  "cut": [
+   0.235,
+   158.819
+  ],
+  "gain_db": -2.9,
+  "set": "pads",
+  "vocal_db": -55.9,
+  "vocal_worst_db": -50.5,
+  "vocal_worst_at": 80,
+  "drums_db": -55.5,
+  "secs": 158.58,
+  "lufs": -18.5,
+  "peak_db": -5.5,
+  "bytes": 1090732,
+  "ok": true
+ }
+}

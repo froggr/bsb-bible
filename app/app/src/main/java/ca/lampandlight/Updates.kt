@@ -284,10 +284,12 @@ object Updates {
     /**
      * Fetch the music beds from the little server into `files/beds/`.
      *
-     * About 12 MB for the eight of them, so they are downloaded rather than shipped: most of
+     * About 11 MB for all of them, so they are downloaded rather than shipped: most of
      * the APK's weight is already the Bible text, and not everyone wants music.
      *
-     * Beds already present are skipped, so an interrupted download resumes.
+     * Beds already present are skipped, so an interrupted download resumes. Once every
+     * track is here, files that are no longer a bed (the eight loops before 0.53) are
+     * deleted.
      */
     fun fetchBeds(ctx: Context, onProgress: (Long, Long) -> Unit = { _, _ -> }): Int {
         val dir = File(ctx.filesDir, Beds.DIR).apply { mkdirs() }
@@ -322,6 +324,10 @@ object Updates {
             }
             onProgress(done.toLong(), total)
         }
+        if (done == Beds.ALL.size) {
+            val keep = Beds.ALL.map { "${it.name}.opus" }.toSet()
+            dir.listFiles()?.filter { it.name !in keep }?.forEach { it.delete() }
+        }
         Log.i(TAG, "beds: $done of $total in ${dir.path}")
         return done
     }
@@ -331,6 +337,15 @@ object Updates {
         val dir = File(ctx.filesDir, Beds.DIR)
         if (!dir.isDirectory) return 0
         return Beds.ALL.count { File(dir, "${it.name}.opus").let { f -> f.exists() && f.length() > 0 } }
+    }
+
+    /**
+     * Is there music here from before 0.53, the eight beds the tracks replaced? Then the
+     * music was asked for once, whatever is chosen now, and the new set is owed.
+     */
+    fun bedsOld(ctx: Context): Boolean {
+        val keep = Beds.ALL.map { "${it.name}.opus" }.toSet()
+        return File(ctx.filesDir, Beds.DIR).listFiles()?.any { it.name.endsWith(".opus") && it.name !in keep } == true
     }
 
     /** True when the server advertises a build newer than this one. */

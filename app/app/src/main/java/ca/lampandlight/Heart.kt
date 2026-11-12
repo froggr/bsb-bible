@@ -1,5 +1,6 @@
 package ca.lampandlight
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -75,6 +76,10 @@ import androidx.lifecycle.compose.LifecycleStartEffect
  * width, so the verse does not shift as it is uncovered. [at] is the phrase the voice is on,
  * [ByHeart.WHOLE] when it is on all of them, or -1 when it is silent, and [hush] is true
  * while it is leaving room for the listener rather than speaking.
+ *
+ * Said from memory and listened to, it fills in: [heard] is the words of each line that
+ * have been heard, by their place in the line, and they show where they stand though the
+ * line is still covered. [next] is the line being listened for then, or -1.
  */
 @Composable
 fun VersePanel(
@@ -83,6 +88,8 @@ fun VersePanel(
     seen: Set<Int>,
     at: Int,
     hush: Boolean,
+    heard: Map<Int, Set<Int>> = emptyMap(),
+    next: Int = -1,
     onTap: ((Int) -> Unit)?,
 ) {
     val p = LocalPalette.current
@@ -97,14 +104,17 @@ fun VersePanel(
             ) {
                 phrases.forEachIndexed { i, phrase ->
                     val on = at == i || at == ByHeart.WHOLE
+                    // Nobody is leading, and this is the line the page is listening for.
+                    val mine = at < 0 && next == i
                     Phrase(
                         text = phrase,
                         mode = if (i in seen) ByHeart.NEW else level,
-                        waiting = hush && on,
+                        heard = heard[i] ?: emptySet(),
+                        waiting = (hush && on) || mine,
                         sounding = !hush && on,
                         // The voice is busy elsewhere in the verse: this line stands back.
                         back = at >= 0 && !on,
-                        lead = at == i,
+                        lead = at == i || mine,
                         onTap = onTap?.takeIf { i !in seen && level != ByHeart.NEW }?.let { { it(i) } },
                     )
                 }
@@ -127,12 +137,29 @@ fun VersePanel(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun Phrase(
-    text: String, mode: Int, waiting: Boolean, sounding: Boolean, back: Boolean, lead: Boolean,
-    onTap: (() -> Unit)?,
+    text: String, mode: Int, heard: Set<Int>, waiting: Boolean, sounding: Boolean, back: Boolean,
+    lead: Boolean, onTap: (() -> Unit)?,
 ) {
     val p = LocalPalette.current
     val scale = LocalTextScale.current
     val shown by animateFloatAsState(if (mode == ByHeart.NEW) 1f else 0f, tween(420), label = "shown")
+    // A word heard comes up where it stands. The ones before it are already there: only
+    // what has just arrived is still arriving.
+    var settled by remember(text) { mutableStateOf(heard) }
+    val arriving = remember(text) { Animatable(1f) }
+    val began = remember(text) { arrayOf(heard) }
+    LaunchedEffect(heard) {
+        if (heard == began[0]) return@LaunchedEffect
+        settled = began[0]; began[0] = heard
+        arriving.snapTo(0f)
+        arriving.animateTo(1f, tween(260))
+        settled = heard
+    }
+    fun inked(word: Int): Float = when {
+        word in settled -> 1f
+        word in heard -> arriving.value
+        else -> 0f
+    }
     val ink by animateColorAsState(if (back) p.inkSoft else p.ink, tween(300), label = "phraseInk")
     val pulse = rememberInfiniteTransition(label = "turn").animateFloat(
         0.3f, 1f, infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "turnPulse",
@@ -170,11 +197,11 @@ private fun Phrase(
         }
         // Punctuation stays, faintly, with the first letters: it is the rhythm of the line.
         val marks = ink.copy(alpha = if (mode == ByHeart.BLANK) shown else maxOf(shown, 0.5f))
-        words.forEach { (_, first, end) ->
+        words.forEachIndexed { k, (_, first, end) ->
             plain(first, marks)
             val kept = if (mode == ByHeart.BLANK) first else first + 1
             plain(kept, ink)
-            plain(end, ink.copy(alpha = shown))
+            plain(end, ink.copy(alpha = maxOf(shown, inked(k))))
         }
         plain(text.length, marks)
     }
@@ -214,13 +241,19 @@ private fun Phrase(
             modifier = Modifier.padding(vertical = 5.dp).drawBehind {
                 val l = layout ?: return@drawBehind
                 if (shown >= 1f) return@drawBehind
-                words.forEach { (_, first, end) ->
+                words.forEachIndexed { k, (_, first, end) ->
                     val from = if (mode == ByHeart.BLANK) first else first + 1
-                    if (from >= end || end > l.layoutInput.text.length) return@forEach
+                    if (from >= end || end > l.layoutInput.text.length) return@forEachIndexed
+                    // The rule under a word goes as the word comes.
+                    val left = 1f - inked(k)
+                    if (left <= 0f) return@forEachIndexed
                     val a = l.getBoundingBox(from)
                     val b = l.getBoundingBox(end - 1)
                     val y = l.getLineBaseline(l.getLineForOffset(from)) + 3.dp.toPx()
-                    drawLine(line, Offset(a.left + 1f, y), Offset(b.right - 1f, y), 1.5.dp.toPx(), StrokeCap.Round)
+                    drawLine(
+                        line.copy(alpha = line.alpha * left), Offset(a.left + 1f, y), Offset(b.right - 1f, y),
+                        1.5.dp.toPx(), StrokeCap.Round,
+                    )
                 }
             },
         )
@@ -236,7 +269,14 @@ private fun Phrase(
  * child sounding a line out is not hurried, and someone who has it is not kept waiting.
  * With hearing switched on the telling can be the line itself: [ears] listens for it during
  * the turn and the voice goes on when it has been said. The button stays, for the line the
- * recogniser will not hear, and whether the verse was known is still the reader's to say.
+ * recogniser will not hear.
+ *
+ * And with hearing on, a verse said from memory is listened to as it is said. The words
+ * come up on the page as they are heard, and a line said is shown whole. Every line said
+ * with none of them looked at first is the verse known, and the card says so itself. That
+ * is the one thing hearing ever marks. It never marks a verse missed: what it did not
+ * hear stays covered for the reader to see, and "Not yet" is still theirs to say, because
+ * a recogniser that misses a line is not a child who did not know it.
  *
  * [slot] is the verse's place in whatever the voice is reading, so it can tell its own
  * phrases from another verse's. [said] is the answer given, or null while it is open.
@@ -290,17 +330,26 @@ fun HeartCard(
     // the microphone go. It is closed here, and the turn is asked for again on the way back.
     var shown by remember { mutableStateOf(true) }
     var visits by remember { mutableIntStateOf(0) }
+    // The turn this card opened the microphone for. Another card may have opened it since,
+    // while this one was sliding away, and that turn is not this card's to close.
+    val mic = remember { intArrayOf(0) }
     LifecycleStartEffect(ears) {
         if (!shown) { shown = true; visits++ }
-        onStopOrDispose { shown = false; ears.stop() }
+        onStopOrDispose { shown = false; ears.stop(mic[0]) }
     }
+    // Said from memory: the lines heard said, the words heard of each, and the lines that
+    // were said while they were still covered.
+    var spoke by remember(item.heart.verse) { mutableStateOf(emptySet<Int>()) }
+    var filled by remember(item.heart.verse) { mutableStateOf(emptyMap<Int, Set<Int>>()) }
+    var clean by remember(item.heart.verse) { mutableStateOf(emptySet<Int>()) }
+    var byEar by remember(item.heart.verse) { mutableStateOf(false) }
     DisposableEffect(want, hear.on, ears.loaded, shown, visits) {
-        tries = 0; again = false
         if (want == null || !shown || !hear.on || !ears.loaded) return@DisposableEffect onDispose { }
+        tries = 0; again = false
         val line = Heard.words(want)
         val got = ArrayList<String>()
         val turn = at
-        ears.listen { text ->
+        val opened = ears.listen { text ->
             got += Heard.words(text)
             // Said in two breaths it comes in two parts. Said five times, only the last
             // few goes are worth weighing.
@@ -310,7 +359,51 @@ fun HeartCard(
                 narrator.goOn()
             } else tries++
         }
-        onDispose { ears.stop() }
+        mic[0] = opened
+        onDispose { ears.stop(opened) }
+    }
+
+    // Said from memory with nobody leading, the whole verse is listened for at once. What
+    // has been heard is laid against all of it each time more comes, and the page fills in.
+    val passage = remember(item.phrases) { Heard.Passage(item.phrases) }
+    val most = remember(item.phrases) { item.phrases.sumOf { Heard.words(it).size } * 3 + 12 }
+    val covered = all.any { it !in seen && it !in spoke }
+    val open = trying && !mine && said == null && covered && shown && hear.on && ears.loaded
+    DisposableEffect(open, visits) {
+        if (!open) return@DisposableEffect onDispose { }
+        tries = 0; again = false
+        // The stretches that have ended. One still being said is weighed with them and
+        // then let go, for the next telling of it is the whole of it again.
+        val done = ArrayList<String>()
+        fun weigh(got: List<String>, ended: Boolean) {
+            val f = passage.follow(got)
+            val fresh = f.said - spoke
+            // What is heard stays heard: a later guess at the same stretch takes nothing back.
+            filled = all.associateWith { (filled[it] ?: emptySet()) + f.words[it] }
+            if (fresh.isNotEmpty()) {
+                // A line looked at and then said has been read, not remembered.
+                clean = clean + fresh.filter { it !in seen }
+                spoke = spoke + fresh
+            } else if (ended) tries++
+        }
+        val opened = ears.listen(
+            onPartial = { text -> weigh(done + Heard.words(text), ended = false) },
+            onHeard = { text ->
+                done += Heard.words(text)
+                while (done.size > most) done.removeAt(0)
+                weigh(done, ended = true)
+            },
+        )
+        mic[0] = opened
+        onDispose { ears.stop(opened) }
+    }
+    // Every line said and none looked at: that is the verse known, and nobody has to say so.
+    // After a moment, so the last line is seen to arrive.
+    LaunchedEffect(clean, said, trying) {
+        if (said != null || !trying || clean.size < all.size) return@LaunchedEffect
+        kotlinx.coroutines.delay(900)
+        byEar = true
+        onSaid(Quiz.RIGHT)
     }
     LaunchedEffect(tries) {
         if (tries == 0) return@LaunchedEffect
@@ -320,6 +413,9 @@ fun HeartCard(
     }
     LaunchedEffect(ears.voiced) { if (ears.voiced) again = false }
     val heard = held && ears.listening
+    val following = open && ears.listening
+    // Listened to the end, but a line was looked at on the way: the reader says how it went.
+    val helped = trying && !mine && !covered && spoke.isNotEmpty() && clean.size < all.size
 
     Column(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 22.dp)) {
         Text(
@@ -336,13 +432,16 @@ fun HeartCard(
         VersePanel(
             phrases = item.phrases,
             level = if (said != null) ByHeart.NEW else level,
-            seen = seen, at = at, hush = hush,
+            seen = seen + spoke, at = at, hush = hush,
+            heard = if (said == null && trying) filled else emptyMap(),
+            next = if (following) all.firstOrNull { it !in seen && it !in spoke } ?: -1 else -1,
             onTap = if (said == null) { i -> seen = seen + i } else null,
         )
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.Top) {
         Cue(
             when {
+                said == Quiz.RIGHT && byEar -> "Heard, all of it. It comes back $back."
                 said == Quiz.RIGHT -> "It comes back $back."
                 said != null -> "It will come back in a few minutes."
                 heard && again -> "Say it once more, or go on."
@@ -354,15 +453,23 @@ fun HeartCard(
                 hush -> "Your turn. Say it."
                 mine -> "Listen."
                 !trying -> "Read it through aloud, or listen and say each line after the voice."
+                // The moment between the last line arriving and its being marked.
+                !covered && clean.size >= all.size -> "Heard, all of it."
+                following && all.last() in spoke -> "Not all of it was heard. Say what is still covered, or tap it."
+                following && again -> "Go on from where it stops, or tap a line to see it."
+                helped -> "Said, with a look at the page. Did you have it?"
+                following && level == ByHeart.BLANK -> "Say it from memory. It fills in as you are heard."
+                following -> "Say it aloud. It fills in as you are heard, and the first letters are there to lean on."
                 level == ByHeart.BLANK -> "Say it aloud from memory. Tap a line if you are stuck."
                 else -> "Say it aloud. The first letters are there to lean on. Tap a line to see it."
             },
-            yours = hush && said == null,
+            yours = (hush || following) && said == null,
             modifier = Modifier.weight(1f),
         )
-        // Where the eye already is when it is your turn. Only with a voice to take turns with.
-        if (said == null && narrator.modelReady()) HearMark(
-            on = hear.on, listening = heard, voiced = ears.voiced,
+        // Where the eye already is when it is your turn. Where there is something to hear:
+        // a turn taken with the voice, or the verse said from memory.
+        if (said == null && (trying || narrator.modelReady())) HearMark(
+            on = hear.on, listening = heard || following, voiced = ears.voiced,
             modifier = Modifier.offset(x = 9.dp, y = (-10).dp),
         ) { hear.set(!hear.on) }
         }
@@ -377,7 +484,7 @@ fun HeartCard(
                     Listen(playing = mine, preparing = mine && narrator.preparing) {
                         if (mine) narrator.stop()
                         else {
-                            seen = emptySet()
+                            seen = emptySet(); spoke = emptySet(); filled = emptyMap(); clean = emptySet()
                             narrator.speak(
                                 ByHeart.script(slot, item.spoken, item.phrases, level, tap = true), alone = true,
                             )
@@ -391,7 +498,8 @@ fun HeartCard(
                 else if (mine) Unit
                 else if (!trying) Go("Now say it") {
                     if (narrator.alone) narrator.stop()
-                    seen = emptySet(); trying = true
+                    seen = emptySet(); spoke = emptySet(); filled = emptyMap(); clean = emptySet()
+                    trying = true
                 } else {
                     Text(
                         "Not yet", fontFamily = UiFont, fontSize = 14.sp, fontWeight = FontWeight.Medium,

@@ -82,22 +82,36 @@ Two things that procedure assumes you know:
 
       curl -sL https://github.com/froggr/bsb-bible/releases/latest/download/manifest.json
 
-**`data/beds/` is the real bed set, `public/beds/` is a copy.** They drifted apart before
-0.34 — `public/` still held pre-vocal-removal files, twice the length of the shipped ones,
-which is how the loop points came to be measured against the wrong audio. `data/beds/` matches
-what is on the release. `data/beds/_v1/` holds the beds 0.35 replaced and `_withvocals/` the
-pre-vocal-strip originals; neither ships, both are gitignored.
+**The beds are whole tracks in two kinds since 0.53, and nothing loops.** `beats` is nine
+lo-fi tracks with drums all the way through, `pads` five with none; what is chosen is the
+kind, and `Bed` plays every track of it before any comes round again, each fading in over the
+last five seconds of the one before (an equal-power crossfade mixed in the samples, `CROSS`).
+Joe asked for this after three releases of making a one-minute loop join exactly: a minute of
+music forty times over was what wore, not the join. Do not bring loop points back.
 
-**The beds come from `~/Music/Scripture Radio`** (Lo-Fi, Piano, Prayer Room — 78 tracks of
-2-6 minutes, written as beds). Not from `~/projects/yue2/outputs`: that holds song generations,
-and its only instrumentals are Tron-pastiche and french house, wrong for reading under.
+**`data/beds.py` builds them, and `data/beds/` is the set that ships;** `public/beds/` is a
+copy for `serve.py`. `data/beds/beds.json` is the measurement of each encoded file.
+`data/beds/_v1/` and `_v2/` (the eight loops 0.35 to 0.52 shipped) are old sets, gitignored;
+`_withvocals/` is three old originals still in git. None of them ships.
 
-**No lyrics is a measured claim, not an assumption.** Every candidate goes through
-`demucs --two-stems=vocals` on a 40 s slice and must show its vocal stem at least 40 dB below
-the accompaniment. This matters: 23 of the 78 did NOT measure clean and two separated with the
-vocal stem LOUDER than the music. They may be sustained pads misread as held voices — two
-attempts to distinguish them automatically both failed, ranking the library's cleanest track as
-its most vocal-like — so anything that does not measure clean is simply excluded.
+**The beds come from `~/Music/Scripture Radio`** (Lo-Fi for beats, Prayer Room for pads). Not
+from `~/projects/yue2/outputs`: that holds song generations, and its only instrumentals are
+Tron-pastiche and french house, wrong for reading under.
+
+**No lyrics is a measured claim, not an assumption, and the measurement is not steady.** Every
+track goes through demucs and its vocal stem must sit 40 dB under the rest, over the whole
+track and in its worst ten seconds, measured on the encoded file. demucs places its windows at
+a random offset, and a held organ or pad reads as a held voice on one pass and not the next:
+"Resting Psalm" measured -59 dB from its mp3 and -11 dB encoded. So measure twice
+(`beds.py`, then `beds.py --verify`), and a track that fails either pass is taken out of the
+lists, never argued back in. Four went that way, which is why it is nine and five and not ten
+and six. Two attempts to tell a pad from a voice automatically both failed.
+
+**A release must carry all fourteen as `beds-<name>.opus`.** A phone that had the old eight
+fetches the new set at its first start on 0.53, whether or not a bed is chosen
+(`Updates.bedsOld`), and clears the old files only once all fourteen are in. A phone still on
+0.52 or older asks `latest` for the old names and gets a 404 until it updates: its beds on
+disk keep playing, but a fresh download of music from an old build finds nothing.
 
 **serve.py stages the DEBUG apk.** For a release, copy
 `app/app/build/outputs/apk/release/app-release.apk` yourself; `prepare()` will otherwise leave
@@ -108,63 +122,30 @@ everything from `/latest/download/`, so re-upload `data-bible-study.db.gz` and
 `data-bible-commentary.db.gz` (download them from the previous tag, verify their SHA-256
 against the manifest first) or a fresh install finds no study or commentary layer.
 
-**A bed's loop points belong to one exact file.** Re-render the audio and the points are
-scrap. Never crossfade a loop join.
-
-**Loop in global musical time, and verify by beat timing.** Two approaches failed here, both
-for reasons that look like success at the time:
-
-- **0.34 optimised the spectral distance across the seam.** That measures timbre, not time.
-  It returned loops of 4.11, 5.62 and 16.42 bars — all ending mid-bar. They scored well and
-  lurched, because the ear is counting bars and the measurement was not.
-- **0.35 snapped the loop to librosa's detected beat times**, a whole number of detected beats
-  apart, and reported them as bar-exact. But that beat list *drifts* — successive intervals
-  vary by tens of ms — so sixteen detected beats is not sixteen beats of musical time. Loops
-  shipped at 24.386 and 35.641 bars while the commit message claimed exactness.
-
-What works: fit **one tempo and one downbeat for the whole track**, then derive every position
-by arithmetic as `downbeat + k * bar`. A candidate is then an integer bar count by
-construction and cannot drift. The seam is a **tie-break among bar-exact candidates only** —
-never a reason to leave the grid. `data/loop_points.py` does this.
-
-**The test is timing, not timbre:** `python3 -I data/loop_points.py --verify` splices each loop
-three times, re-runs beat tracking over the splice, and reports how late the beat crossing the
-join arrives. Under ~15 ms is inaudible, ~30 ms is acceptable, 100 ms is the audible skip.
-Morning measured **116 ms** when it was reported as fixed. Also: **do not let a re-fit regress
-a bed that already measures well** — take the better of old and new *per bed*; a global re-fit
-moved `stillness` from 0 ms to 23 ms.
-
-**Timing is necessary but not sufficient — measure LEVEL and BANDS too.** A loop can be
-bar-exact with a perfect seam and still lurch because it ends loud and restarts soft. Morning
-shipped at -4.28 dB across the join and the spectral metric ranked it BEST of all candidates,
-because timbre matched and level is invisible to it. One averaged number also hides a single
-band: an 8-bar candidate read -2.67 dB overall and **-33.7 dB in the bass alone**. `report()`
-returns level and per-band change over two windows — 300 ms for the splice instant, 1.5 s for
-the phrase either side. Read both; a note decaying into the downbeat looks like a huge bass dip
-at 300 ms and is ordinary music.
-
-**`onset_ratio()` is the transient check, and BELOW 1.0 IS GOOD.** It divides the seam's
-disturbance by an ordinary bar line's, so 0.67 means the join is calmer than the music's own
-bars. Only above ~1.3 does a join stand out. A gate rejecting low values rejects the best
-loops — mine did, and called a good bed a failure at 0.67. Treat it as a soft ranking signal,
-not a pass/fail: it moves by a few tenths with loop position.
-
-**Encode first, then derive, then verify on the same bytes.** A loop point belongs to one exact
-file, and three separate failures in 0.35 were all this one mistake: choosing on the source mp3
-then shipping a re-encoded trim; cutting a file flush to its loop so the finder had nothing left
-to search (zero candidates); and carrying a measurement from a whole-file encode onto a re-cut
-file, which read as -9.5 dB and onsetR 84 on good audio. **Never translate points across a cut.**
+**Encode first, then measure, on the same bytes.** Three separate failures in 0.35 were this
+one mistake, when the beds still looped: choosing on the source mp3 and shipping a re-encoded
+trim. It holds for the vocal measurement now. `data/loop_points.py` is what found the loops
+and is kept only as a record; nothing calls it.
 
 **Ducking is proportional to the volume slider** (`Bed.duckFloor`). A fixed ratio is wrong at
 the quiet end: someone who already set the bed low has said what they want, and ducking that
 by a further 4.4 dB leaves nothing, so the music vanishes and returns at every verse. Full
 duck at the top of the slider, none at the bottom.
 
-**Rotation must decode the next bed BEFORE fading the current one,** and must enter the new bed
-at its loop rather than its run-in. Fading first and decoding afterwards is why rotation
-stopped dead and then started again. The cache holds all eight loops (~40 MB) for the same
-reason; at three entries nearly every turn paid for a fresh decode. Run-ins are not cached —
-after the first play they are never wanted again.
+**The next track is opened before the crossfade begins, and both are decoded as they play**
+(`BedStream` in `BedAudio.kt`): nothing is held in memory but the half second being written.
+Fading first and opening afterwards is why rotation once stopped dead and then started again.
+`bed: <name>` in the log is a track starting.
+
+**The voice is levelled after it is made (`Steady`, since 0.53).** Joe heard Methuselah peak
+and crackle. The model's output does not clip, but its clauses come out at very different
+levels: forty verses of Methuselah measured 13 dB apart, quietest clause to loudest, against
+3 dB for Spencer, and sampling temperature made no measurable difference to level. `Steady`
+takes the rumble off below 60 Hz, brings each clause toward one level and holds peaks with a
+short look-ahead limiter; `evened +3.4 dB, peaks held -1.2 dB` in the log is one clause. On
+the emulator the gains ran from -2.4 to +6.4 dB over 48 clauses. **Nobody has listened to it
+yet.** Measurements have agreed with me and disagreed with Joe about audio before, every
+time: his ear decides whether the crackle is gone and whether the voice still has its life.
 
 ## Compose text links are a trap
 
@@ -348,8 +329,9 @@ voice died at the second level, where the reference is a line by itself. Guard a
 
 **Listening is not logged, only "I had it" and "Not yet".** The hands-free pass cannot know
 whether anything was said, so it moves no verse along. Since 0.52 the card can hear a line
-(see *Hearing* below), and that is not logged either: being heard ends the turn and marks
-nobody.
+(see *Hearing* below), and being heard in a turn with the voice is not logged either. One
+thing heard is logged, since 0.53: the whole verse said from memory with nothing looked at,
+which is "I had it" without the tap.
 
 **Making a passage longer starts it again; making it shorter does not.** `heart.since` is the
 time from which `said` rows count. `Questions.stretch` moves it only when the passage grows,
@@ -390,8 +372,29 @@ long passage also wants its end. It was tuned on 5,460 measured pairs, kept in `
 end because a child said "shepard" costs more than one that ends early, and nothing is marked
 either way. "Go on" stays on the card for the same reason.
 
-**Hearing marks nobody and writes nothing.** No row, no score, no recording kept. Only
-"I had it" and "Not yet" move a verse, as before.
+**Hearing can mark a verse known and can never mark it missed.** Joe asked (0.53) for the
+from-memory test to listen, fill in and check. With the letters covered and the microphone
+on, everything heard is laid against the whole passage (`Heard.Passage.follow`, an alignment
+in order that lets the speaker stop, start a line again or leave one out), the words heard
+fade in where they belong, and a bar marks the line it is waiting for. Every line said while
+it was still covered writes `Quiz.RIGHT`, as "I had it" does, after a 900 ms look at the last
+line arriving ("Heard, all of it"). Anything less writes nothing: a line left out stays
+covered with "Not yet" and "I had it" still on the card, and a line tapped open and then said
+has been read, not remembered, so the card asks. Do not make a miss automatic. The recogniser
+mishears children and accents, and Joe has asked for nothing that shames. No recording is
+kept either way.
+
+**`follow` asks one thing a turn does not: that the line's end was reached.** Four words of
+five is the line said by `Heard.said`, but shown at that moment it hands over the fifth while
+it is being looked for. A line counts once its last word is heard, or the speaker has gone on
+to a later line, or something came after the last of it that was heard. `FollowTest` holds
+the cases, the mishearings in them taken from the real recogniser.
+
+**The recogniser tells what it has so far every 0.8 s of speech** (`listen(onPartial, onHeard)`),
+and a later guess at the same stretch may differ from an earlier one ("The Lord is mine." then
+"The Lord is my shepherd."). The card only ever adds to what is filled in. `listen` returns a
+token and `stop(token)` closes only that listener: two things on one screen had been closing
+each other's microphone. A load that finishes after `release()` is ignored (`loads`).
 
 **The recogniser is touched only on the `ears` worker thread; the `mic` lock guards only the
 detector** and is held for a whole turn. Taking that lock in `decode` deadlocks: nothing is
@@ -409,8 +412,36 @@ bit). Files pushed with adb belong to the shell and the app cannot see them: aft
     adb shell 'su 0 chown -R <app uid>:1078 /data/media/0/Android/data/ca.lampandlight/files/ears'
 
 or the app quietly opens the silent microphone and the test looks like a dead recogniser.
-A release build ignores the files. **A real voice through a real microphone had never been
-tried when 0.52 shipped**: the recordings were the Mac's `say` voices.
+A release build ignores the files. The turn count starts again whenever the models are
+released, which Search does on the way out. Joe has since said hearing works on his phone in
+the turns with the voice (0.52). **Everything new in 0.53 has only heard the Mac's `say`
+voices**: the from-memory fill, and search by voice.
+
+## Search by voice
+
+**The microphone in the search box is the same recogniser, loaded at the first tap and let go
+on leaving** (`loadedHere`): 136 MB of model is not held for a screen that may never use it.
+One breath is one search. What is heard goes into the box as it comes, so a reference is
+offered before the sentence ends, and the microphone closes after 7 s of nobody speaking.
+
+**A reference said aloud is read by `Reference.spoken`, not `parse`.** The recogniser writes
+"John three sixteen.", "First Corinthians thirteen, versus four to seven.", "Some twenty
+three" for Psalm 23. `spoken` reads number words, homophones (won, too, for, ate), "chapter"
+and "verse", and "to" as a range only between two numbers. A book name is matched exactly,
+then by prefix, then by nearness, and "some/sum" is Psalm only when a number follows. It is
+plain loops with no regex, like `Heard`. `SpokenTest` holds what the real recogniser wrote
+for twenty references in two voices. A spoken reference is offered as "Go to", never opened
+by itself: a mishearing must not move the reader.
+
+**Words that are in no single verse fall back to the nearest verses (`Bible.nearest`).** The
+recogniser is often a word out ("Be still and know that iron god"), and the ordinary search
+wants every word. The fallback weighs each word by how rare it is, from the search index's
+own vocabulary (`fts4aux` over `verses_fts`, as a temp table: 14,176 terms), looks up near
+spellings of a word the Bible does not have, wants one telling word at least, and lets the
+order of the words break ties, or 2 Chronicles 25:16 outranks Psalm 46:10 for "be still and
+know". The page says "No verse has all of that. The nearest:". It is used for typed searches
+too, and never for a quoted phrase. `fts4aux` is there on Android 13 (SQLite 3.32.2) and 17;
+if a phone's SQLite lacks it the log says "no vocabulary" and there is simply no fallback.
 
 **`adb devices` may list a real Pixel 9 beside the two emulators.** Set `ANDROID_SERIAL` on
 every call; a bare `adb` then fails with "more than one device", which is the better outcome.

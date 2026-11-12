@@ -968,20 +968,15 @@ internal fun PlayerBar(
 
                     Setting(
                         label = "Bed",
-                        value = when (bed.track) {
-                            null -> "None"
-                            Bed.ROTATE -> "Rotating"
-                            else -> Beds.label(bed.track!!)
-                        },
-                        // Under rotation the useful detail is which bed is actually playing,
-                        // not the word "rotating" again.
-                        detail = if (bed.track == Bed.ROTATE) bed.sounding?.let { Beds.label(it) }
-                                 else bed.track?.let { Beds.of(it)?.detail },
+                        value = bed.track?.let { Beds.label(it) } ?: "None",
+                        // What is chosen is a kind of music; the detail is the track of it
+                        // that is playing now.
+                        detail = bed.sounding?.let { Beds.label(it) },
                         on = open == "bed",
                         onTap = { open = if (open == "bed") null else "bed" },
                     )
                     if (open == "bed") {
-                        val have = bed.available()
+                        val have = bed.kinds()
                         if (have.isEmpty()) {
                             // Nothing to pick from yet: say where the music comes from rather
                             // than showing an empty list.
@@ -995,21 +990,11 @@ internal fun PlayerBar(
                                 Choice("None", null, bed.track == null) {
                                     bed.stop(); prefs.bed = ""; prefs.save(); open = null
                                 }
-                                // One 57-second loop over an hour's reading is what grates,
-                                // not the loop itself — so offer to move through them all.
-                                if (have.size > 1) {
-                                    Choice(
-                                        "Rotate",
-                                        "move through them all",
-                                        bed.track == Bed.ROTATE,
-                                    ) {
-                                        bed.choose(Bed.ROTATE)
-                                        prefs.bed = bed.track ?: ""; prefs.save()
-                                    }
-                                }
-                                Beds.ALL.filter { it.name in have }.forEach { item ->
-                                    Choice(item.label, item.detail, bed.track == item.name) {
-                                        bed.choose(item.name)
+                                // A kind, not a track: the bed moves through every track
+                                // of the kind chosen, so nothing comes round for a long while.
+                                have.forEach { kind ->
+                                    Choice(kind.label, kind.detail, bed.track == kind.name) {
+                                        bed.choose(kind.name)
                                         prefs.bed = bed.track ?: ""; prefs.save()
                                     }
                                 }
@@ -1127,9 +1112,7 @@ internal fun PlayerBar(
                         buildString {
                             append(if (narrator.modelReady()) narrator.voice else "voice not downloaded")
                             // Name the bed that is sounding; under rotation that changes.
-                            (bed.sounding ?: bed.track)?.let {
-                                append(" · ").append(if (it == Bed.ROTATE) "Music" else Beds.label(it))
-                            }
+                            (bed.sounding ?: bed.track)?.let { append(" · ").append(Beds.label(it)) }
                         },
                         fontFamily = UiFont, fontSize = 11.sp, color = p.inkSoft,
                     )
