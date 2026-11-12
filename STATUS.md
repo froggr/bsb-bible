@@ -61,6 +61,40 @@ Install / share: <https://github.com/froggr/bsb-bible/releases/latest>
 | Coming back to the app comes back to the book | Fixed in 0.47. Android keeps the intent a task was first started with and hands it over again when the app has been cleared from memory and is reopened from Recents. If that first intent was a passage link, the verse-of-the-day widget or an epub tapped in Files, 0.46 obeyed it a second time and showed the Bible. Reproduced on the published 0.46 on the API 33 emulator: start from `bsb://open?ref=John+3:16`, open a book, go home, `am kill`, return through Recents, and the app is on John 3. Same steps on 0.47, debug on Android 17 and release on API 33: the book, at its chapter. A fresh link while the app is running still goes to its passage. **Not covered:** whether this is how Joe's task began; on 0.46 the chapter-end crash above also cleared the app, and after a crash the same replay happens. Leaving a book by its Bible button, then losing the app from memory, also returns to the book, which was already so. |
 | A voice chosen while reading takes over at once | 0.47. Choosing a voice mid-reading restarts from the line being heard in the new voice; before, it applied from the next start. Stop during generation now abandons the clause within one 80 ms frame. Verified on the Android 17 emulator from the clause log 2026-11-10. Not covered: a phone. |
 
+## Next
+
+Joe asked for a learning mode built on what people have written, never on generated
+questions, easy enough that his wife and children use it. He liked every idea put to him.
+Shipped so far: the questions (0.48), by heart (0.49), the look back and the map (0.50), the
+tap in place of a timed pause and the note field (0.51, inside 0.52), hearing (0.52).
+
+**Waiting on Joe, from his phone:**
+
+- Whether hearing works at all with a real voice: does it hear him, does it ever go on before
+  he has finished, does it work for the children. Nothing else about it has been tried.
+- How the look back at the last chapter feels.
+- Whether the phrases of a verse break where he would breathe.
+
+**To build, in the order agreed:**
+
+1. **Follow a Hebrew or Greek word** through the places it is used. Show him how it would
+   look before building it. The Strong's numbers are already in the study layer.
+2. **Say a chapter back** as a voice note to yourself.
+3. **A family round** with the fifty Open Bible Stories and their study questions
+   (unfoldingWord `en_obs-sq`, CC BY-SA 4.0, 785 entries, from git.door43.org).
+4. **Discovery Bible Study's "respond" questions** after a passage.
+
+He has said the app is getting busy with the books in it: fold a new thing into a screen
+that exists, and use a drawn mark where a label would go.
+
+**Not to be started until he asks:** the switch to the King James and other open Bibles with
+Strong's numbers; sources for the eighteen epub titles that are not on Gutenberg; making the
+next chapter's speech ahead of time (he has said the pause between chapters is fine); the
+Song of Songs headings.
+
+**Housekeeping:** the `v0.51` release is a draft that was never published and can be deleted.
+`v0.52` must not be: the app fetches the hearing files from it.
+
 ## Known broken / unfinished
 
 - **Press-and-drag verse selection.** Rewritten to a single `awaitEachGesture` in 0.24 after

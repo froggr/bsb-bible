@@ -64,13 +64,14 @@ class HeardTest {
 
     /**
      * The scores this was tuned at, worked out by the script it was tried in: a line, what
-     * was heard, and the score, tab between, one to a row. Named by HEARD_PAIRS.
+     * was heard, and the score, tab between, one to a row. They are `data/heard_pairs.tsv`;
+     * HEARD_PAIRS names another file.
      */
     @Test fun `it scores as it was measured`() {
-        val file = System.getenv("HEARD_PAIRS")?.let(::File)
-        assumeTrue(file != null && file.exists())
+        val file = File(System.getenv("HEARD_PAIRS") ?: "../../data/heard_pairs.tsv")
+        assumeTrue(file.exists())
         var n = 0
-        file!!.forEachLine { row ->
+        file.forEachLine { row ->
             val (want, got, score) = row.split('\t').takeIf { it.size == 3 } ?: return@forEachLine
             assertEquals("$want | $got", score.toFloat(), Heard.score(Heard.words(want), Heard.words(got)), 0.0005f)
             n++

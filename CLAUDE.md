@@ -21,6 +21,43 @@ certificate with them. Instead:
 
 **`timeout(1)` does not exist** on this machine. Use the Bash tool's own timeout.
 
+## Trying it on the emulators
+
+There are two AVDs, both arm64, both rooted with `su 0`: **`lamp37`** (Android 17, 1080x2424)
+for the debug build, and **`grocerylab`** (Android 13) for installing a release build over the
+release before it. Start them headless, in the background, each on its own port:
+
+    ANDROID_HOME=/opt/homebrew/share/android-commandlinetools \
+      /opt/homebrew/share/android-commandlinetools/emulator/emulator \
+      -avd lamp37 -port 5556 -no-window -no-audio -no-boot-anim -no-snapshot-save
+    # and: -avd grocerylab -port 5554
+
+Look at `adb devices` first: a session before yours may have left them running.
+
+**Set `ANDROID_SERIAL` on every adb call** (`emulator-5556`, `emulator-5554`). Joe's Pixel 9
+has been on USB beside them. Do not install on it or drive it unless he says so.
+
+`tools/build.sh` builds the debug APK, installs it and starts it; `tools/shot.sh <dir> <name>`
+takes a screenshot into a scratch folder; `tools/tap.py list` prints the texts on screen and
+`tools/tap.py "=Go over"` taps one. All three refuse to run without `ANDROID_SERIAL`.
+
+- **Start the app with `am start -n ca.lampandlight/.MainActivity`.** On `grocerylab` the
+  `monkey -c LAUNCHER` way exits with -5 and starts nothing: its home screen is Joe's
+  herdvoice launcher.
+- **A `tap.py list` that does not match the screenshot means the app is not in front.** A
+  failed `uiautomator dump` leaves the last dump in place. It cost a wrong conclusion once.
+- **A release build is not debuggable**, so `run-as` fails there: read and change its files
+  with `su 0` under `/data/data/ca.lampandlight/`.
+- **To make the app download from the Mac**, serve a folder with
+  `python3 -I -m http.server 8791 --bind 127.0.0.1` and add
+  `<string name="host">http://10.0.2.2:8791</string>` to `shared_prefs/updates.xml` with the
+  app stopped. Take the line out afterwards, or the app looks for updates there.
+- Each device is learning something already, which Go over opens on: Psalm 23:1 and Proverbs
+  3:5-10 on `lamp37`, Romans 8:29 on `grocerylab`.
+- Unit tests: `cd app && JAVA_HOME=/opt/homebrew/opt/openjdk@17
+  ANDROID_HOME=/opt/homebrew/share/android-commandlinetools ./gradlew -q testDebugUnitTest`.
+  Silence is a pass.
+
 ## Source on GitHub
 
 Since 0.38 the source lives on `origin/main` at `https://github.com/froggr/bsb-bible` (before
@@ -348,8 +385,8 @@ the four `.so` files under `jniLibs/` are its libraries; nothing is built from s
 
 **The matcher is forgiving on purpose, and it only ever answers "was that the line".**
 `Heard.said` wants six tenths of the words, allows near spellings and homophones, and for a
-long passage also wants its end. It was tuned on 5,460 measured pairs (`HEARD_PAIRS` re-runs
-them): about 0.4% of wrong lines pass. Do not tighten it to stop that. A turn that will not
+long passage also wants its end. It was tuned on 5,460 measured pairs, kept in `data/heard_pairs.tsv` and run by
+`HeardTest` every time: about 0.4% of wrong lines pass. Do not tighten it to stop that. A turn that will not
 end because a child said "shepard" costs more than one that ends early, and nothing is marked
 either way. "Go on" stays on the card for the same reason.
 

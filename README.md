@@ -135,6 +135,8 @@ known broken.
 | `data/beds/` | The music beds that SHIP. Not a source directory — see below |
 | `data/beds/_withvocals/` | Untouched originals for stillness, psalter, evening |
 | `public/beds/` | Untouched originals for morning, shepherd, vigil, upper-room, wilderness |
+| `data/heard_pairs.tsv` | 5,460 measured pairs of a line and what the recogniser heard, which `HeardTest` scores on every run |
+| `tools/` | Helpers for trying the app on an emulator: build and install, screenshot, tap by text, make a test recording. See `CLAUDE.md` |
 | `app/keystore/` | The release signing key. Irreplaceable — read `app/KEYSTORE-README.md` |
 
 ## Building
