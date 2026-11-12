@@ -1,6 +1,6 @@
 # Status
 
-Last updated 2026-11-11, **0.48** released.
+Last updated 2026-11-11, **0.49** released.
 
 Install / share: <https://github.com/froggr/bsb-bible/releases/latest>
 
