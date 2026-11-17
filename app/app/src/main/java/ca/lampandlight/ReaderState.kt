@@ -6,6 +6,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.toMutableStateList
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * A drawn line of the chapter.
@@ -806,7 +808,10 @@ class ReaderState(
     /** The chapter the loaded study material belongs to, so it is fetched once. */
     private var studyFor: Pair<Int, Int>? = null
 
-    /** Runs the disk read. Set by the UI, which owns a coroutine scope. */
+    /**
+     * Starts the work of fetching the study layers, on the main thread. Set by the UI, which
+     * owns a coroutine scope. The work steps off the main thread itself, and only to read.
+     */
     var background: ((suspend () -> Unit) -> Unit)? = null
 
     /** Put study mode back as it was left, on launch. */
@@ -830,9 +835,17 @@ class ReaderState(
     /**
      * Read the chapter's commentary and cross-references.
      *
-     * Off the main thread: Matthew Henry on a long chapter is a few hundred KB of text, and
-     * the scroll must not stop for it. The page shows without the study layers until it
-     * lands, which is better than a blank chapter.
+     * The reading is off the main thread: Matthew Henry on a long chapter is a few hundred
+     * KB of text, and the scroll must not stop for it. The page shows without the study
+     * layers until it lands, which is better than a blank chapter.
+     *
+     * What was read is put on the page from the main thread, and nothing here is ever to be
+     * written from another. [rows] is what the reader's list is made of, and a list that
+     * changes between a frame's composition and its measuring is measured against rows it
+     * has not composed: following a cross-reference crashed 0.53 with "measure is called on
+     * a deactivated node" (Matthew 1:23 to John 1:14 on a Pixel 9, and any link within one
+     * chapter on the emulator, every time). Two fetches finishing on two threads could also
+     * leave one chapter laid out with another's commentary, which shows as none at all.
      */
     private fun fetchStudy() {
         val want = book to chapter
@@ -840,8 +853,9 @@ class ReaderState(
         if (go == null) { rebuild(); return }
         studyLoading = true
         go {
-            val c = bible.commentaryFor(want.first, want.second)
-            val x = bible.crossRefsFor(want.first, want.second)
+            val (c, x) = withContext(Dispatchers.IO) {
+                bible.commentaryFor(want.first, want.second) to bible.crossRefsFor(want.first, want.second)
+            }
             // The reader may have turned the page while this was reading from disk. A
             // stale fetch must not clear the flag either: the fetch for the new page is
             // still running, and a landing that waits on the flag would stop waiting.

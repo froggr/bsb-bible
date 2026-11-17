@@ -160,6 +160,21 @@ Pixel 9's main thread past the ANR limit (0.41, the first thing a fresh phone hi
 range with a `SpanStyle`, tag it with `addStringAnnotation`, and resolve taps from the
 `TextLayoutResult` — `Citations.linked` / `Citations.targetAt`. The emulator never showed it.
 
+## What a list is made of is written on the main thread only
+
+**Never assign `ReaderState.rows`, or anything else a `LazyColumn` is built from, off the main
+thread.** Read on `Dispatchers.IO` inside `withContext` and assign after it returns. Compose
+composes a frame in a snapshot and measures it against the live state, so a list swapped from
+another thread between the two is measured against rows it never composed, and the app dies
+with `measure is called on a deactivated node` and not one line of ours in the trace. 0.53
+did this in `fetchStudy`: with Study on, following a cross-reference crashed Joe's Pixel 9
+(Matthew 1:23 to John 1:14). On the emulator a jump inside one chapter crashed every time
+(`bsb://open?ref=Psalm+119:105` then `Psalm+119:20`), but his own tap never did until the
+read was slowed by 10 to 20 ms: the emulator's disk is too fast to land in the gap. So no
+crash on the emulator is not evidence here either; slow the read and try again.
+`Library.take` still writes `volumes` from its IO scope while the shelf's grid is on screen.
+Nobody has seen that crash; it is the same mistake.
+
 ## A regex that passes on the desktop can fail on the phone
 
 **Never use `\G` with `Regex.find(text, from)`.** On the desktop JVM it anchors at `from`; on

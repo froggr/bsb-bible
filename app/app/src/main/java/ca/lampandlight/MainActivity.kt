@@ -227,7 +227,7 @@ private fun App(bible: Bible, narrator: Narrator, bed: Bed, ears: Ears, prefs: P
     // state object has no scope of its own, so it borrows the screen's.
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) {
-        state.background = { work -> scope.launch(Dispatchers.IO) { work() } }
+        state.background = { work -> scope.launch { work() } }
         state.restoreStudy(prefs.study, prefs.studyLayers())
     }
 
